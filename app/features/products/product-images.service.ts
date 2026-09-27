@@ -1,52 +1,198 @@
-import { PoolClient } from "pg";
-import { ProductImage } from "./product-images.types";
+import { db } from "@/lib/db";
+import { productImages, products } from "@/drizzle/schema";
+import { withTenantContext } from "@/lib/tenant";
+import { AppError } from "@/lib/errors";
+import { and, eq, desc } from "drizzle-orm";
 
-function mapRow(row: { id: string; product_id: string; image_url: string; is_primary: boolean; created_at: string }): ProductImage {
-  return {
-    id: Number(row.id),
-    productId: Number(row.product_id),
-    imageUrl: row.image_url,
-    isPrimary: row.is_primary,
-    createdAt: row.created_at,
-  };
+export interface AddProductImageInput {
+  imageUrl: string;
+  isPrimary?: boolean;
 }
 
-export async function listImages(client: PoolClient, productId: number): Promise<ProductImage[]> {
-  const result = await client.query(
-    "select * from product_images where product_id = $1 order by is_primary desc, created_at",
-    [productId]
-  );
-  return result.rows.map(mapRow);
+export interface UpdateProductImageInput {
+  imageUrl?: string;
+  isPrimary?: boolean;
 }
 
-export async function addImage(
-  client: PoolClient,
-  tenantId: number,
-  productId: number,
-  data: { imageUrl: string; isPrimary?: boolean }
-): Promise<ProductImage> {
-  if (data.isPrimary) {
-    await client.query("update product_images set is_primary = false where product_id = $1", [productId]);
-  }
-  const result = await client.query(
-    `insert into product_images (tenant_id, product_id, image_url, is_primary)
-     values ($1, $2, $3, $4)
-     returning *`,
-    [tenantId, productId, data.imageUrl, data.isPrimary ?? false]
-  );
-  return mapRow(result.rows[0]);
+/**
+ * Lists all gallery images for a given product.
+ */
+export async function getProductImages(
+  tenantId: number | bigint,
+  productId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+
+  const images = await db
+    .select({
+      id: productImages.id,
+      productId: productImages.productId,
+      tenantId: productImages.tenantId,
+      imageUrl: productImages.imageUrl,
+      isPrimary: productImages.isPrimary,
+      createdAt: productImages.createdAt,
+    })
+    .from(productImages)
+    .where(
+      and(
+        eq(productImages.productId, pProductId),
+        eq(productImages.tenantId, pTenantId)
+      )
+    )
+    .orderBy(desc(productImages.isPrimary), desc(productImages.createdAt));
+
+  return images.map((img) => ({
+    ...img,
+    id: img.id.toString(),
+  }));
 }
 
-export async function setPrimaryImage(client: PoolClient, productId: number, imageId: number): Promise<ProductImage | null> {
-  await client.query("update product_images set is_primary = false where product_id = $1", [productId]);
-  const result = await client.query(
-    "update product_images set is_primary = true where id = $1 and product_id = $2 returning *",
-    [imageId, productId]
-  );
-  return result.rowCount ? mapRow(result.rows[0]) : null;
+/**
+ * Adds an image to a product. If set as primary, unsets existing primary image first.
+ */
+export async function addProductImage(
+  tenantId: number | bigint,
+  userId: string,
+  productId: number | bigint | string,
+  input: AddProductImageInput
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+  const pProductIdBigInt = BigInt(productId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    // 1. Verify parent product exists under this tenant[cite: 1]
+    const [product] = await tx
+      .select({ id: products.id })
+      .from(products)
+      .where(
+        and(
+          eq(products.id, pProductIdBigInt),
+          eq(products.tenantId, pTenantId)
+        )
+      )
+      .limit(1);
+
+    if (!product) {
+      throw new AppError(404, "Product not found for this tenant.");
+    }
+
+    // 2. Unset previous primary image if setting new image as primary[cite: 1]
+    if (input.isPrimary) {
+      await tx
+        .update(productImages)
+        .set({ isPrimary: false })
+        .where(
+          and(
+            eq(productImages.productId, pProductId),
+            eq(productImages.tenantId, pTenantId)
+          )
+        );
+    }
+
+    // 3. Insert new product image[cite: 1]
+    const [newImage] = await tx
+      .insert(productImages)
+      .values({
+        tenantId: pTenantId,
+        productId: pProductId,
+        imageUrl: input.imageUrl,
+        isPrimary: input.isPrimary ?? false,
+      })
+      .returning();
+
+    return {
+      ...newImage,
+      id: newImage.id.toString(),
+    };
+  });
 }
 
-export async function deleteImage(client: PoolClient, id: number): Promise<boolean> {
-  const result = await client.query("delete from product_images where id = $1", [id]);
-  return (result.rowCount ?? 0) > 0;
+/**
+ * Updates image properties (e.g. promoting an image to primary).
+ */
+export async function updateProductImage(
+  tenantId: number | bigint,
+  userId: string,
+  productId: number | bigint | string,
+  imageId: number | bigint | string,
+  input: UpdateProductImageInput
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+  const pImageIdBigInt = BigInt(imageId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    // If setting as primary, demote existing primary images for this product[cite: 1]
+    if (input.isPrimary) {
+      await tx
+        .update(productImages)
+        .set({ isPrimary: false })
+        .where(
+          and(
+            eq(productImages.productId, pProductId),
+            eq(productImages.tenantId, pTenantId)
+          )
+        );
+    }
+
+    const updatePayload: Record<string, unknown> = {};
+    if (input.imageUrl !== undefined) updatePayload.imageUrl = input.imageUrl;
+    if (input.isPrimary !== undefined) updatePayload.isPrimary = input.isPrimary;
+
+    const [updated] = await tx
+      .update(productImages)
+      .set(updatePayload)
+      .where(
+        and(
+          eq(productImages.id, pImageIdBigInt),
+          eq(productImages.productId, pProductId),
+          eq(productImages.tenantId, pTenantId)
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      throw new AppError(404, "Product image not found.");
+    }
+
+    return {
+      ...updated,
+      id: updated.id.toString(),
+    };
+  });
+}
+
+/**
+ * Deletes an image record from a product.
+ */
+export async function deleteProductImage(
+  tenantId: number | bigint,
+  userId: string,
+  productId: number | bigint | string,
+  imageId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+  const pImageIdBigInt = BigInt(imageId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    const deleted = await tx
+      .delete(productImages)
+      .where(
+        and(
+          eq(productImages.id, pImageIdBigInt),
+          eq(productImages.productId, pProductId),
+          eq(productImages.tenantId, pTenantId)
+        )
+      )
+      .returning({ id: productImages.id });
+
+    if (!deleted.length) {
+      throw new AppError(404, "Product image not found.");
+    }
+
+    return { success: true };
+  });
 }

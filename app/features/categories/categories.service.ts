@@ -1,82 +1,256 @@
-import { PoolClient } from "pg";
-import { Category } from "./categories.types";
+import { db } from "@/lib/db";
+import { categories } from "@/drizzle/schema";
+import { withTenantContext } from "@/lib/tenant";
+import { AppError } from "@/lib/errors";
+import { and, eq, sql, desc, asc } from "drizzle-orm";
 
-function mapRow(row: { id: string; tenant_id: string; name: string; slug: string; description: string | null; parent_id: string | null; is_active: boolean; created_at: string; updated_at: string }): Category {
-  return {
-    id: Number(row.id),
-    tenantId: Number(row.tenant_id),
-    name: row.name,
-    slug: row.slug,
-    description: row.description,
-    parentId: row.parent_id !== null ? Number(row.parent_id) : null,
-    isActive: row.is_active,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+export interface CreateCategoryInput {
+  name: string;
+  slug: string;
+  description?: string | null;
+  parentId?: number | bigint | string | null;
+  isActive?: boolean;
 }
 
-export async function listCategories(client: PoolClient): Promise<Category[]> {
-  const result = await client.query("select * from categories order by name");
-  return result.rows.map(mapRow);
+export interface UpdateCategoryInput {
+  name?: string;
+  slug?: string;
+  description?: string | null;
+  parentId?: number | bigint | string | null;
+  isActive?: boolean;
 }
 
-export async function getCategoryById(client: PoolClient, id: number): Promise<Category | null> {
-  const result = await client.query("select * from categories where id = $1", [id]);
-  return result.rowCount ? mapRow(result.rows[0]) : null;
+/**
+ * Retrieves all active categories for a tenant, including subcategory hierarchy.
+ */
+export async function getTenantCategories(tenantId: number | bigint) {
+  const pTenantId = Number(tenantId);
+
+  const rows = await db
+    .select({
+      id: categories.id,
+      tenantId: categories.tenantId,
+      name: categories.name,
+      slug: categories.slug,
+      description: categories.description,
+      parentId: categories.parentId,
+      isActive: categories.isActive,
+      createdAt: categories.createdAt,
+      updatedAt: categories.updatedAt,
+    })
+    .from(categories)
+    .where(
+      and(
+        eq(categories.tenantId, pTenantId),
+        eq(categories.isActive, true)
+      )
+    )
+    .orderBy(asc(categories.name));
+
+  return rows.map((cat) => ({
+    ...cat,
+    id: cat.id.toString(),
+  }));
 }
 
-export async function createCategory(
-  client: PoolClient,
-  tenantId: number,
-  data: { name: string; slug: string; description?: string; parentId?: number }
-): Promise<Category> {
-  const result = await client.query(
-    `insert into categories (tenant_id, name, slug, description, parent_id)
-     values ($1, $2, $3, $4, $5)
-     returning *`,
-    [tenantId, data.name, data.slug, data.description ?? null, data.parentId ?? null]
-  );
-  return mapRow(result.rows[0]);
-}
+/**
+ * Fetches a single category by its ID.
+ */
+export async function getCategoryById(
+  tenantId: number | bigint,
+  categoryId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pCategoryIdBigInt = BigInt(categoryId);
 
-export async function updateCategory(
-  client: PoolClient,
-  id: number,
-  data: Partial<{ name: string; slug: string; description: string; parentId: number; isActive: boolean }>
-): Promise<Category | null> {
-  const columnMap: Record<string, string> = {
-    name: "name",
-    slug: "slug",
-    description: "description",
-    parentId: "parent_id",
-    isActive: "is_active",
-  };
+  const [category] = await db
+    .select()
+    .from(categories)
+    .where(
+      and(
+        eq(categories.id, pCategoryIdBigInt),
+        eq(categories.tenantId, pTenantId),
+        eq(categories.isActive, true)
+      )
+    )
+    .limit(1);
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let i = 1;
-
-  for (const [key, column] of Object.entries(columnMap)) {
-    if (key in data) {
-      fields.push(`${column} = $${i}`);
-      values.push((data as { [key: string]: unknown })[key]);
-      i++;
-    }
+  if (!category) {
+    return null;
   }
 
-  if (fields.length === 0) return getCategoryById(client, id);
-
-  fields.push("updated_at = now()");
-  values.push(id);
-
-  const result = await client.query(
-    `update categories set ${fields.join(", ")} where id = $${i} returning *`,
-    values
-  );
-  return result.rowCount ? mapRow(result.rows[0]) : null;
+  return {
+    ...category,
+    id: category.id.toString(),
+  };
 }
 
-export async function deleteCategory(client: PoolClient, id: number): Promise<boolean> {
-  const result = await client.query("delete from categories where id = $1", [id]);
-  return (result.rowCount ?? 0) > 0;
+/**
+ * Creates a new category under the tenant context.
+ */
+export async function createCategory(
+  tenantId: number | bigint,
+  userId: string,
+  input: CreateCategoryInput
+) {
+  const pTenantId = Number(tenantId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    // 1. Verify slug uniqueness for this tenant[cite: 1]
+    const [existingSlug] = await tx
+      .select({ id: categories.id })
+      .from(categories)
+      .where(
+        and(
+          eq(categories.tenantId, pTenantId),
+          eq(categories.slug, input.slug)
+        )
+      )
+      .limit(1);
+
+    if (existingSlug) {
+      throw new AppError(409, "A category with this slug already exists.");
+    }
+
+    // 2. Validate parent category if provided[cite: 1]
+    if (input.parentId) {
+      const [parent] = await tx
+        .select({ id: categories.id })
+        .from(categories)
+        .where(
+          and(
+            eq(categories.id, BigInt(input.parentId)),
+            eq(categories.tenantId, pTenantId)
+          )
+        )
+        .limit(1);
+
+      if (!parent) {
+        throw new AppError(404, "Parent category not found.");
+      }
+    }
+
+    // 3. Insert category[cite: 1]
+    const [newCategory] = await tx
+      .insert(categories)
+      .values({
+        tenantId: pTenantId,
+        name: input.name,
+        slug: input.slug,
+        description: input.description ?? null,
+        parentId: input.parentId != null ? Number(input.parentId) : null,
+        isActive: input.isActive ?? true,
+      })
+      .returning();
+
+    return {
+      ...newCategory,
+      id: newCategory.id.toString(),
+    };
+  });
+}
+
+/**
+ * Updates an existing category.
+ */
+export async function updateCategory(
+  tenantId: number | bigint,
+  userId: string,
+  categoryId: number | bigint | string,
+  input: UpdateCategoryInput
+) {
+  const pTenantId = Number(tenantId);
+  const pCategoryIdBigInt = BigInt(categoryId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    // Prevent setting self as parent category[cite: 1]
+    if (input.parentId != null && BigInt(input.parentId) === pCategoryIdBigInt) {
+      throw new AppError(400, "A category cannot be its own parent.");
+    }
+
+    // Check slug collision[cite: 1]
+    if (input.slug) {
+      const [existingSlug] = await tx
+        .select({ id: categories.id })
+        .from(categories)
+        .where(
+          and(
+            eq(categories.tenantId, pTenantId),
+            eq(categories.slug, input.slug),
+            sql`${categories.id} != ${pCategoryIdBigInt}`
+          )
+        )
+        .limit(1);
+
+      if (existingSlug) {
+        throw new AppError(409, "A category with this slug already exists.");
+      }
+    }
+
+    const updatePayload: Record<string, unknown> = {
+      updatedAt: sql`now()`,
+    };
+
+    if (input.name !== undefined) updatePayload.name = input.name;
+    if (input.slug !== undefined) updatePayload.slug = input.slug;
+    if (input.description !== undefined) updatePayload.description = input.description;
+    if (input.parentId !== undefined) {
+      updatePayload.parentId = input.parentId != null ? Number(input.parentId) : null;
+    }
+    if (input.isActive !== undefined) updatePayload.isActive = input.isActive;
+
+    const [updated] = await tx
+      .update(categories)
+      .set(updatePayload)
+      .where(
+        and(
+          eq(categories.id, pCategoryIdBigInt),
+          eq(categories.tenantId, pTenantId)
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      throw new AppError(404, "Category not found.");
+    }
+
+    return {
+      ...updated,
+      id: updated.id.toString(),
+    };
+  });
+}
+
+/**
+ * Soft deletes a category by disabling its active state.
+ */
+export async function deleteCategory(
+  tenantId: number | bigint,
+  userId: string,
+  categoryId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pCategoryIdBigInt = BigInt(categoryId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    const [deleted] = await tx
+      .update(categories)
+      .set({
+        isActive: false,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(categories.id, pCategoryIdBigInt),
+          eq(categories.tenantId, pTenantId)
+        )
+      )
+      .returning({ id: categories.id });
+
+    if (!deleted) {
+      throw new AppError(404, "Category not found.");
+    }
+
+    return { success: true };
+  });
 }

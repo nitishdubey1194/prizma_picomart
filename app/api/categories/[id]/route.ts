@@ -1,51 +1,126 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { AppError, toErrorResponse } from "@/lib/errors";
-import { getAuthUser, getOptionalAuthUser } from "@/app/features/auth/auth.middleware";
-import { updateCategorySchema } from "@/app/features/categories/categories.schema";
-import { getCategoryById, updateCategory, deleteCategory } from "@/app/features/categories/categories.service";
+import { getCurrentTenant } from "@/lib/tenant";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
+import {
+  getCategoryById,
+  updateCategory,
+  deleteCategory,
+  type UpdateCategoryInput,
+} from "@/app/features/categories/categories.service";
+import { AppError } from "@/lib/errors";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export async function GET(
+  _request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
     const { id } = await params;
-    const user = getOptionalAuthUser(req);
-    const category = await withUserContext(user?.id ?? null, (client) => getCategoryById(client, Number(id)));
-    if (!category) throw new AppError(404, "Category not found.");
-    return NextResponse.json(category, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const categoryId = Number(id);
+
+    if (!categoryId) {
+      return NextResponse.json(
+        { error: "A valid category ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const category = await getCategoryById(tenant.id, categoryId);
+
+    if (!category) {
+      return NextResponse.json({ error: "Category not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ category }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to fetch category";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PATCH(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const body = await req.json();
-    const data = updateCategorySchema.parse(body);
-    const category = await withUserContext(user.id, (client) => updateCategory(client, Number(id), data));
-    if (!category) throw new AppError(404, "Category not found.");
-    return NextResponse.json(category, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const categoryId = Number(id);
+
+    if (!categoryId) {
+      return NextResponse.json(
+        { error: "A valid category ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const body = (await request.json()) as UpdateCategoryInput;
+    const tenant = await getCurrentTenant();
+
+    const updated = await updateCategory(tenant.id, user.id, categoryId, body);
+
+    return NextResponse.json({ category: updated }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to update category";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: RouteParams) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const deleted = await withUserContext(user.id, (client) => deleteCategory(client, Number(id)));
-    if (!deleted) throw new AppError(404, "Category not found.");
-    return new NextResponse(null, { status: 204 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const categoryId = Number(id);
+
+    if (!categoryId) {
+      return NextResponse.json(
+        { error: "A valid category ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const result = await deleteCategory(tenant.id, user.id, categoryId);
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to delete category";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

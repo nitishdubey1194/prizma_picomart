@@ -1,98 +1,189 @@
-import { addMinutes } from "date-fns";
-import { fromZonedTime } from "date-fns-tz";
+import { db } from "@/lib/db";
+import {
+  providerAvailability,
+  providerAvailabilityExceptions,
+  appointments,
+  services,
+  providerServices,
+} from "@/drizzle/schema";
+import { AppError } from "@/lib/errors";
+import { and, eq, ne, sql } from "drizzle-orm";
 
-const STORE_TIMEZONE = "Asia/Kolkata";
-
-export type TimeSlot = {
-  start: string;
-  end: string;
-  available: boolean;
-};
-
-interface WeeklyHoursBlock {
-  weekday: number;
-  startTime: string;
-  endTime: string;
+export interface SlotTime {
+  startTime: string; // ISO 8601
+  endTime: string;   // ISO 8601
+  formattedTime: string; // e.g. "09:00 - 09:30"
 }
 
-interface ExceptionDay {
-  exceptionDate: string;
-  isAvailable: boolean;
-  startTime?: string | null;
-  endTime?: string | null;
+export interface GenerateSlotsOptions {
+  tenantId: number | bigint;
+  providerId: number | bigint;
+  serviceId: number | bigint;
+  date: string; // YYYY-MM-DD
 }
 
-interface ExistingAppointment {
-  startTime: string;
-  endTime: string;
-}
+/**
+ * Generates open appointment slots for a given provider, service, and date.
+ */
+export async function generateAvailableSlots(
+  options: GenerateSlotsOptions
+): Promise<SlotTime[]> {
+  const pTenantId = Number(options.tenantId);
+  const pProviderId = Number(options.providerId);
+  const pServiceId = Number(options.serviceId);
+  const targetDateStr = options.date;
 
-interface GenerateSlotsParams {
-  date: string;
-  weeklyHours: WeeklyHoursBlock[];
-  exceptions: ExceptionDay[];
-  existingAppointments: ExistingAppointment[];
-  durationMinutes: number;
-  now?: Date;
-}
+  // 1. Fetch service requirements (duration and buffer minutes)[cite: 1]
+  const [service] = await db
+    .select({
+      id: services.id,
+      durationMinutes: services.durationMinutes,
+      bufferMinutes: services.bufferMinutes,
+      overrideDuration: providerServices.durationOverrideMinutes,
+      isMappingActive: providerServices.isActive,
+    })
+    .from(services)
+    .leftJoin(
+      providerServices,
+      and(
+        eq(providerServices.serviceId, services.id),
+        eq(providerServices.providerId, pProviderId),
+        eq(providerServices.tenantId, pTenantId)
+      )
+    )
+    .where(
+      and(
+        eq(services.id, pServiceId),
+        eq(services.tenantId, pTenantId),
+        eq(services.isActive, true)
+      )
+    )
+    .limit(1);
 
-export function generateSlots({
-  date,
-  weeklyHours,
-  exceptions,
-  existingAppointments,
-  durationMinutes,
-  now = new Date(),
-}: GenerateSlotsParams): TimeSlot[] {
-  const [year, month, day] = date.split("-").map(Number);
-  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  if (!service) {
+    throw new AppError(404, "Service not found or unavailable.");
+  }
 
-  const exception = exceptions.find((e) => e.exceptionDate === date);
+  const effectiveDuration = service.overrideDuration ?? service.durationMinutes;
+  const totalSlotSpanMs = (effectiveDuration + service.bufferMinutes) * 60 * 1000;
+  const serviceDurationMs = effectiveDuration * 60 * 1000;
 
-  if (exception && !exception.isAvailable) return [];
+  // 2. Check for date exceptions (blackout vs special working hours)[cite: 1]
+  const [exception] = await db
+    .select()
+    .from(providerAvailabilityExceptions)
+    .where(
+      and(
+        eq(providerAvailabilityExceptions.tenantId, pTenantId),
+        eq(providerAvailabilityExceptions.providerId, pProviderId),
+        eq(providerAvailabilityExceptions.exceptionDate, targetDateStr)
+      )
+    )
+    .limit(1);
 
-  const blocks: { startTime: string; endTime: string }[] =
-    exception?.isAvailable && exception.startTime && exception.endTime
-      ? [{ startTime: exception.startTime, endTime: exception.endTime }]
-      : weeklyHours.filter((h) => h.weekday === weekday);
+  // If a blackout date exception exists (isAvailable = false), return no slots[cite: 1]
+  if (exception && !exception.isAvailable) {
+    return [];
+  }
 
-  if (blocks.length === 0) return [];
+  // 3. Determine operational time windows for the target date[cite: 1]
+  interface TimeWindow {
+    startMs: number;
+    endMs: number;
+  }
+  const operationalWindows: TimeWindow[] = [];
 
-  const sortedAppointments = [...existingAppointments].sort((a, b) =>
-    a.startTime.localeCompare(b.startTime)
-  );
+  if (exception && exception.isAvailable && exception.startTime && exception.endTime) {
+    const windowStart = new Date(`${targetDateStr}T${exception.startTime}`).getTime();
+    const windowEnd = new Date(`${targetDateStr}T${exception.endTime}`).getTime();
+    operationalWindows.push({ startMs: windowStart, endMs: windowEnd });
+  } else {
+    // Fall back to recurring weekday schedule[cite: 1]
+    const weekday = new Date(`${targetDateStr}T00:00:00`).getDay(); // 0 (Sun) to 6 (Sat)
 
-  const slots: TimeSlot[] = [];
-
-  for (const block of blocks) {
-    const blockStart = fromZonedTime(`${date}T${block.startTime}`, STORE_TIMEZONE);
-    const blockEnd = fromZonedTime(`${date}T${block.endTime}`, STORE_TIMEZONE);
-
-    let cursor = blockStart;
-
-    while (addMinutes(cursor, durationMinutes) <= blockEnd) {
-      const candidateEnd = addMinutes(cursor, durationMinutes);
-
-      const conflict = sortedAppointments.find(
-        (a) => cursor < new Date(a.endTime) && candidateEnd > new Date(a.startTime)
+    const scheduleBlocks = await db
+      .select({
+        startTime: providerAvailability.startTime,
+        endTime: providerAvailability.endTime,
+      })
+      .from(providerAvailability)
+      .where(
+        and(
+          eq(providerAvailability.tenantId, pTenantId),
+          eq(providerAvailability.providerId, pProviderId),
+          eq(providerAvailability.weekday, weekday),
+          eq(providerAvailability.isActive, true)
+        )
       );
 
-      if (conflict) {
-        cursor = new Date(conflict.endTime);
-        continue;
-      }
-
-      const isPast = cursor < now;
-
-      slots.push({
-        start: cursor.toISOString(),
-        end: candidateEnd.toISOString(),
-        available: !isPast,
-      });
-
-      cursor = candidateEnd;
+    for (const block of scheduleBlocks) {
+      const windowStart = new Date(`${targetDateStr}T${block.startTime}`).getTime();
+      const windowEnd = new Date(`${targetDateStr}T${block.endTime}`).getTime();
+      operationalWindows.push({ startMs: windowStart, endMs: windowEnd });
     }
   }
 
-  return slots.sort((a, b) => a.start.localeCompare(b.start));
+  if (operationalWindows.length === 0) {
+    return [];
+  }
+
+  // 4. Fetch all existing active appointments on this date[cite: 1]
+  const bookedAppointments = await db
+    .select({
+      startTime: appointments.startTime,
+      endTime: appointments.endTime,
+    })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.tenantId, pTenantId),
+        eq(appointments.providerId, pProviderId),
+        eq(appointments.localDate, targetDateStr),
+        ne(appointments.status, "cancelled")
+      )
+    );
+
+  const bookedRanges = bookedAppointments.map((b) => ({
+    startMs: new Date(b.startTime).getTime(),
+    endMs: new Date(b.endTime).getTime(),
+  }));
+
+  // 5. Generate discrete time intervals and filter out conflicts[cite: 1]
+  const availableSlots: SlotTime[] = [];
+  const nowMs = Date.now();
+
+  for (const window of operationalWindows) {
+    let currentSlotStartMs = window.startMs;
+
+    while (currentSlotStartMs + serviceDurationMs <= window.endMs) {
+      const currentSlotEndMs = currentSlotStartMs + serviceDurationMs;
+
+      // Ensure slot is not in the past
+      if (currentSlotStartMs > nowMs) {
+        // Check for collision with any booked appointment
+        const hasOverlap = bookedRanges.some(
+          (booked) =>
+            currentSlotStartMs < booked.endMs && currentSlotEndMs > booked.startMs
+        );
+
+        if (!hasOverlap) {
+          const startDate = new Date(currentSlotStartMs);
+          const endDate = new Date(currentSlotEndMs);
+
+          const formatTimeStr = (d: Date) =>
+            d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+
+          availableSlots.push({
+            startTime: startDate.toISOString(),
+            endTime: endDate.toISOString(),
+            formattedTime: `${formatTimeStr(startDate)} - ${formatTimeStr(endDate)}`,
+          });
+        }
+      }
+
+      currentSlotStartMs += totalSlotSpanMs;
+    }
+  }
+
+  return availableSlots;
 }

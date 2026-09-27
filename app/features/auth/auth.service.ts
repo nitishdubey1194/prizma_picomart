@@ -1,85 +1,252 @@
-import { pool } from "@/lib/db";
+import { db } from "@/lib/db";
+import { users, profiles, refreshTokens, tenantUsers } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { RegisterInput, LoginInput, AuthResponse, AuthTokens } from "./auth.types";
 import {
   hashPassword,
-  comparePassword,
-  generateAccessToken,
-  generateRefreshToken,
+  verifyPassword,
   hashToken,
-  REFRESH_TTL_DAYS,
+  generateRefreshToken,
+  generateAccessToken,
 } from "./auth.utils";
-import { AuthUser, TokenPair } from "./auth.types";
 
-async function issueTokenPair(user: AuthUser): Promise<TokenPair> {
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken();
-  const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
+const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 
-  await pool.query(
-    `insert into refresh_tokens (user_id, token_hash, expires_at) values ($1, $2, $3)`,
-    [user.id, hashToken(refreshToken), expiresAt]
-  );
+export async function registerUser(
+  tenantId: number,
+  input: RegisterInput
+): Promise<AuthResponse> {
+  const normalizedEmail = input.email.toLowerCase().trim();
 
-  return { accessToken, refreshToken };
-}
+  // 1. Check existing user
+  const [existingUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`LOWER(${users.email}::text) = ${normalizedEmail}`)
+    .limit(1);
 
-export async function registerUser(email: string, password: string): Promise<TokenPair> {
-  const existing = await pool.query("select id from users where email = $1", [email]);
-  if (existing.rowCount) {
-    throw new AppError(409, "An account with this email already exists.");
+  if (existingUser) {
+    throw new AppError(409, "User with this email already exists.");
   }
 
-  const passwordHash = await hashPassword(password);
-  const result = await pool.query(
-    `insert into users (email, password_hash) values ($1, $2) returning id, email`,
-    [email, passwordHash]
-  );
-  const user = result.rows[0] as AuthUser;
-  return issueTokenPair(user);
+  const passwordHash = await hashPassword(input.password);
+
+  return await db.transaction(async (tx) => {
+    // 2. Insert user[cite: 1]
+    const [newUser] = await tx
+      .insert(users)
+      .values({
+        email: sql`${normalizedEmail}::citext`,
+        passwordHash,
+      })
+      .returning({ id: users.id });
+
+    // 3. Insert profile[cite: 1]
+    await tx.insert(profiles).values({
+      id: newUser.id,
+      fullName: input.fullName ?? null,
+      email: normalizedEmail,
+      tenantId,
+      role: "customer",
+    });
+
+    // 4. Bind membership in tenant_users[cite: 1]
+    await tx.insert(tenantUsers).values({
+      tenantId,
+      userId: newUser.id,
+      role: "customer",
+      isActive: true,
+    });
+
+    // 5. Generate and store refresh token[cite: 1]
+    const rawRefreshToken = generateRefreshToken();
+    const tokenDigest = hashToken(rawRefreshToken);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    await tx.insert(refreshTokens).values({
+      userId: newUser.id,
+      tokenHash: tokenDigest,
+      expiresAt,
+    });
+
+    const accessToken = generateAccessToken({
+      userId: newUser.id,
+      email: normalizedEmail,
+      role: "customer",
+      tenantId,
+    });
+
+    return {
+      user: {
+        id: newUser.id,
+        email: normalizedEmail,
+        role: "customer",
+        tenantId,
+      },
+      tokens: {
+        accessToken,
+        refreshToken: rawRefreshToken,
+      },
+    };
+  });
 }
 
-export async function loginUser(email: string, password: string): Promise<TokenPair> {
-  const result = await pool.query(
-    "select id, email, password_hash from users where email = $1",
-    [email]
-  );
-  if (!result.rowCount) {
+export async function loginUser(
+  tenantId: number,
+  input: LoginInput
+): Promise<AuthResponse> {
+  const normalizedEmail = input.email.toLowerCase().trim();
+
+  // 1. Fetch user credentials and tenant role[cite: 1]
+  const [userRecord] = await db
+    .select({
+      id: users.id,
+      email: sql<string>`${users.email}::text`,
+      passwordHash: users.passwordHash,
+      role: tenantUsers.role,
+      isTenantUserActive: tenantUsers.isActive,
+    })
+    .from(users)
+    .leftJoin(
+      tenantUsers,
+      and(
+        eq(tenantUsers.userId, users.id),
+        eq(tenantUsers.tenantId, tenantId)
+      )
+    )
+    .where(sql`LOWER(${users.email}::text) = ${normalizedEmail}`)
+    .limit(1);
+
+  if (!userRecord) {
     throw new AppError(401, "Invalid email or password.");
   }
 
-  const row = result.rows[0];
-  const valid = await comparePassword(password, row.password_hash);
-  if (!valid) {
+  const isPasswordValid = await verifyPassword(input.password, userRecord.passwordHash);
+  if (!isPasswordValid) {
     throw new AppError(401, "Invalid email or password.");
   }
 
-  return issueTokenPair({ id: row.id, email: row.email });
-}
-
-export async function refreshTokenPair(refreshToken: string): Promise<TokenPair> {
-  const tokenHash = hashToken(refreshToken);
-  const result = await pool.query(
-    `select rt.id, rt.user_id, u.email
-     from refresh_tokens rt
-     join users u on u.id = rt.user_id
-     where rt.token_hash = $1 and rt.revoked_at is null and rt.expires_at > now()`,
-    [tokenHash]
-  );
-
-  if (!result.rowCount) {
-    throw new AppError(401, "Refresh token is invalid or expired.");
+  if (userRecord.isTenantUserActive === false) {
+    throw new AppError(403, "Your account has been deactivated for this tenant.");
   }
 
-  const row = result.rows[0];
-  await pool.query("update refresh_tokens set revoked_at = now() where id = $1", [row.id]);
+  const assignedRole = userRecord.role ?? "customer";
 
-  return issueTokenPair({ id: row.user_id, email: row.email });
+  // 2. Persist new refresh token[cite: 1]
+  const rawRefreshToken = generateRefreshToken();
+  const tokenDigest = hashToken(rawRefreshToken);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  await db.insert(refreshTokens).values({
+    userId: userRecord.id,
+    tokenHash: tokenDigest,
+    expiresAt,
+  });
+
+  const accessToken = generateAccessToken({
+    userId: userRecord.id,
+    email: userRecord.email,
+    role: assignedRole,
+    tenantId,
+  });
+
+  return {
+    user: {
+      id: userRecord.id,
+      email: userRecord.email,
+      role: assignedRole,
+      tenantId,
+    },
+    tokens: {
+      accessToken,
+      refreshToken: rawRefreshToken,
+    },
+  };
 }
 
-export async function revokeRefreshToken(refreshToken: string): Promise<void> {
-  const tokenHash = hashToken(refreshToken);
-  await pool.query(
-    "update refresh_tokens set revoked_at = now() where token_hash = $1 and revoked_at is null",
-    [tokenHash]
-  );
+export async function refreshUserTokens(
+  tenantId: number,
+  rawRefreshToken: string
+): Promise<AuthTokens> {
+  const tokenDigest = hashToken(rawRefreshToken);
+
+  // 1. Match active and unrevoked refresh token[cite: 1]
+  const [storedToken] = await db
+    .select({
+      id: refreshTokens.id,
+      userId: refreshTokens.userId,
+      expiresAt: refreshTokens.expiresAt,
+      revokedAt: refreshTokens.revokedAt,
+      email: sql<string>`${users.email}::text`,
+      role: tenantUsers.role,
+    })
+    .from(refreshTokens)
+    .innerJoin(users, eq(users.id, refreshTokens.userId))
+    .leftJoin(
+      tenantUsers,
+      and(
+        eq(tenantUsers.userId, refreshTokens.userId),
+        eq(tenantUsers.tenantId, tenantId)
+      )
+    )
+    .where(
+      and(
+        eq(refreshTokens.tokenHash, tokenDigest),
+        isNull(refreshTokens.revokedAt)
+      )
+    )
+    .limit(1);
+
+  if (!storedToken) {
+    throw new AppError(401, "Invalid or revoked refresh token.");
+  }
+
+  if (new Date(storedToken.expiresAt).getTime() < Date.now()) {
+    throw new AppError(401, "Refresh token has expired. Please log in again.");
+  }
+
+  // 2. Token rotation: revoke old token and emit a new one[cite: 1]
+  const nextRawRefreshToken = generateRefreshToken();
+  const nextTokenDigest = hashToken(nextRawRefreshToken);
+  const nextExpiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(refreshTokens)
+      .set({ revokedAt: new Date().toISOString() })
+      .where(eq(refreshTokens.id, storedToken.id));
+
+    await tx.insert(refreshTokens).values({
+      userId: storedToken.userId,
+      tokenHash: nextTokenDigest,
+      expiresAt: nextExpiresAt,
+    });
+  });
+
+  const nextAccessToken = generateAccessToken({
+    userId: storedToken.userId,
+    email: storedToken.email,
+    role: storedToken.role ?? "customer",
+    tenantId,
+  });
+
+  return {
+    accessToken: nextAccessToken,
+    refreshToken: nextRawRefreshToken,
+  };
+}
+
+export async function logoutUser(rawRefreshToken: string): Promise<void> {
+  const tokenDigest = hashToken(rawRefreshToken);
+
+  await db
+    .update(refreshTokens)
+    .set({ revokedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(refreshTokens.tokenHash, tokenDigest),
+        isNull(refreshTokens.revokedAt)
+      )
+    );
 }

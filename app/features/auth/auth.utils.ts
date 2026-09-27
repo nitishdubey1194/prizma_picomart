@@ -1,35 +1,62 @@
-import bcrypt from "bcrypt";
-import crypto from "crypto";
+import { createHash, randomBytes } from "crypto";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { AuthUser } from "./auth.types";
+import { NextRequest } from "next/server";
+import { AuthenticatedUser, TokenPayload } from "./auth.types";
 
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET!;
-const ACCESS_TTL = (process.env.ACCESS_TOKEN_TTL || "15m") as jwt.SignOptions["expiresIn"];
-export const REFRESH_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30);
+const JWT_SECRET: string = process.env.JWT_SECRET ?? "default-access-secret-minimum-32-chars";
+const REFRESH_SECRET: string = process.env.JWT_REFRESH_SECRET ?? "default-refresh-secret-minimum-32-chars";
+const SALT_ROUNDS = 12;
 
-export function hashPassword(password: string) {
-  return bcrypt.hash(password, 12);
+export async function hashPassword(password: string): Promise<string> {
+  return await bcrypt.hash(password, SALT_ROUNDS);
 }
 
-export function comparePassword(password: string, hash: string) {
-  return bcrypt.compare(password, hash);
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return await bcrypt.compare(password, hash);
 }
 
-export function generateAccessToken(user: AuthUser) {
-  return jwt.sign({ sub: user.id, email: user.email }, ACCESS_SECRET, {
-    expiresIn: ACCESS_TTL,
-  });
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
-export function verifyAccessToken(token: string): AuthUser {
-  const payload = jwt.verify(token, ACCESS_SECRET) as { sub: string; email: string };
-  return { id: payload.sub, email: payload.email };
+export function generateRefreshToken(): string {
+  return randomBytes(40).toString("hex");
 }
 
-export function generateRefreshToken() {
-  return crypto.randomBytes(64).toString("hex");
+export function generateAccessToken(payload: Omit<TokenPayload, "iat" | "exp">): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "15m" });
 }
 
-export function hashToken(token: string) {
-  return crypto.createHash("sha256").update(token).digest("hex");
+export function verifyAccessToken(token: string): TokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (typeof decoded === "object" && decoded !== null && "userId" in decoded && "email" in decoded) {
+      return decoded as TokenPayload;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getAuthUser(request: NextRequest): Promise<AuthenticatedUser | null> {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.substring(7);
+  const payload = verifyAccessToken(token);
+
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    id: payload.userId,
+    email: payload.email,
+    role: payload.role,
+    tenantId: payload.tenantId,
+  };
 }

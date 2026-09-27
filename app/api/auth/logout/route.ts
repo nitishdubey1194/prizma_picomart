@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { refreshSchema } from "@/app/features/auth/auth.schema";
-import { revokeRefreshToken } from "@/app/features/auth/auth.service";
-import { toErrorResponse } from "@/lib/errors";
+import { refreshTokenSchema } from "@/app/features/auth/auth.schema";
+import { logoutUser } from "@/app/features/auth/auth.service";
+import { AppError } from "@/lib/errors";
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body = await req.json();
-    const { refreshToken } = refreshSchema.parse(body);
-    await revokeRefreshToken(refreshToken);
-    return new NextResponse(null, { status: 204 });
-  } catch (err: unknown) {
-      const { status, message } = toErrorResponse(err);
-      return NextResponse.json({ message }, { status });
+    const rawBody: unknown = await request.json();
+    const { refreshToken } = refreshTokenSchema.parse(rawBody);
+
+    await logoutUser(refreshToken);
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
+    const message = error instanceof Error ? error.message : "Logout failed";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }

@@ -1,87 +1,207 @@
-import { PoolClient } from "pg";
-import { ProductVariant } from "./products.types";
+import { db } from "@/lib/db";
+import { productVariants, products } from "@/drizzle/schema";
+import { withTenantContext } from "@/lib/tenant";
+import { AppError } from "@/lib/errors";
+import { and, eq, sql } from "drizzle-orm";
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+export type JsonArray = JsonValue[];
 
-function mapRow(row: { id: string; product_id: string; tenant_id: string; variant_name: string; sku: string | null; price: string; discount_price: string | null; stock_qty: number; max_buy_qty: number | null, attributes_json: Record<string, unknown> | null; created_at: string; updated_at: string }): ProductVariant {
-  return {
-    id: Number(row.id),
-    productId: Number(row.product_id),
-    tenantId: Number(row.tenant_id),
-    variantName: row.variant_name,
-    sku: row.sku,
-    price: Number(row.price),
-    discountPrice: row.discount_price !== null ? Number(row.discount_price) : null,
-    stockQty: row.stock_qty,
-    maxBuyQty: row.max_buy_qty,
-    attributes: row.attributes_json,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+export interface VariantAttributes {
+  [key: string]: JsonValue;
+}
+export interface CreateVariantInput {
+  variantName: string;
+  sku?: string | null;
+  price: string | number;
+  discountPrice?: string | number | null;
+  stockQty?: number;
+  maxBuyQty?: number | null;
+  attributesJson?: Record<string, unknown> | null;
 }
 
-export async function listVariants(client: PoolClient, productId: number): Promise<ProductVariant[]> {
-  const result = await client.query(
-    "select * from product_variants where product_id = $1 order by created_at",
-    [productId]
-  );
-  return result.rows.map(mapRow);
+export interface UpdateVariantInput {
+  variantName?: string;
+  sku?: string | null;
+  price?: string | number;
+  discountPrice?: string | number | null;
+  stockQty?: number;
+  maxBuyQty?: number | null;
+  attributesJson?: Record<string, unknown> | null;
 }
 
-export async function createVariant(
-  client: PoolClient,
-  tenantId: number,
-  productId: number,
-  data: { variantName: string; sku?: string; price: number; discountPrice?: number; stockQty?: number; maxBuyQty?: number; attributes?: Record<string, unknown> }
-): Promise<ProductVariant> {
-  const result = await client.query(
-    `insert into product_variants (tenant_id, product_id, variant_name, sku, price, discount_price, stock_qty, max_buy_qty, attributes_json)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     returning *`,
-    [tenantId, productId, data.variantName, data.sku ?? null, data.price, data.discountPrice ?? null, data.stockQty ?? 0, data.maxBuyQty ?? null, data.attributes ?? null]
-  );
-  return mapRow(result.rows[0]);
+/**
+ * Retrieves all variants for a specific product under a tenant.
+ */
+export async function getVariantsByProduct(
+  tenantId: number | bigint,
+  productId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+
+  const rows = await db
+    .select({
+      id: productVariants.id,
+      productId: productVariants.productId,
+      tenantId: productVariants.tenantId,
+      variantName: productVariants.variantName,
+      sku: productVariants.sku,
+      price: productVariants.price,
+      discountPrice: productVariants.discountPrice,
+      stockQty: productVariants.stockQty,
+      maxBuyQty: productVariants.maxBuyQty,
+      attributesJson: productVariants.attributesJson,
+      createdAt: productVariants.createdAt,
+      updatedAt: productVariants.updatedAt,
+    })
+    .from(productVariants)
+    .where(
+      and(
+        eq(productVariants.productId, pProductId),
+        eq(productVariants.tenantId, pTenantId)
+      )
+    );
+
+  return rows.map((variant) => ({
+    ...variant,
+    id: variant.id.toString(),
+  }));
 }
 
-export async function updateVariant(
-  client: PoolClient,
-  id: number,
-  data: Partial<{ variantName: string; sku: string; price: number; discountPrice: number; stockQty: number; maxBuyQty: number; attributes: Record<string, unknown> }>
-): Promise<ProductVariant | null> {
-  const columnMap: Record<string, string> = {
-    variantName: "variant_name",
-    sku: "sku",
-    price: "price",
-    discountPrice: "discount_price",
-    stockQty: "stock_qty",
-    maxBuyQty: "max_buy_qty",
-    attributes: "attributes_json",
-  };
+/**
+ * Creates a new SKU / variant for a product.
+ */
+export async function createProductVariant(
+  tenantId: number | bigint,
+  userId: string,
+  productId: number | bigint | string,
+  input: CreateVariantInput
+) {
+  const pTenantId = Number(tenantId);
+  const pProductId = Number(productId);
+  const pProductIdBigInt = BigInt(productId);
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let i = 1;
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    // 1. Validate that the parent product belongs to this tenant[cite: 1]
+    const [product] = await tx
+      .select({ id: products.id })
+      .from(products)
+      .where(
+        and(
+          eq(products.id, pProductIdBigInt),
+          eq(products.tenantId, pTenantId)
+        )
+      )
+      .limit(1);
 
-  for (const [key, column] of Object.entries(columnMap)) {
-    if (key in data) {
-      fields.push(`${column} = $${i}`);
-      values.push(data[key as keyof typeof data]);
-      i++;
+    if (!product) {
+      throw new AppError(404, "Parent product not found for this tenant.");
     }
-  }
 
-  if (fields.length === 0) {
-    const existing = await client.query("select * from product_variants where id = $1", [id]);
-    return existing.rowCount ? mapRow(existing.rows[0]) : null;
-  }
+    // 2. Insert variant[cite: 1]
+    const [newVariant] = await tx
+      .insert(productVariants)
+      .values({
+        tenantId: pTenantId,
+        productId: pProductId,
+        variantName: input.variantName,
+        sku: input.sku ?? null,
+        price: String(input.price),
+        discountPrice:
+          input.discountPrice != null ? String(input.discountPrice) : null,
+        stockQty: input.stockQty ?? 0,
+        maxBuyQty: input.maxBuyQty ?? null,
+        attributesJson: input.attributesJson ?? null,
+      })
+      .returning();
 
-  values.push(id);
-  const result = await client.query(
-    `update product_variants set ${fields.join(", ")} where id = $${i} returning *`,
-    values
-  );
-  return result.rowCount ? mapRow(result.rows[0]) : null;
+    return {
+      ...newVariant,
+      id: newVariant.id.toString(),
+    };
+  });
 }
 
-export async function deleteVariant(client: PoolClient, id: number): Promise<boolean> {
-  const result = await client.query("delete from product_variants where id = $1", [id]);
-  return (result.rowCount ?? 0) > 0;
+/**
+ * Updates an existing variant's price, stock, or attributes.
+ */
+export async function updateProductVariant(
+  tenantId: number | bigint,
+  userId: string,
+  variantId: number | bigint | string,
+  input: UpdateVariantInput
+) {
+  const pTenantId = Number(tenantId);
+  const pVariantIdBigInt = BigInt(variantId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    const updateValues: Record<string, unknown> = {
+      updatedAt: sql`now()`,
+    };
+
+    if (input.variantName !== undefined) updateValues.variantName = input.variantName;
+    if (input.sku !== undefined) updateValues.sku = input.sku;
+    if (input.price !== undefined) updateValues.price = String(input.price);
+    if (input.discountPrice !== undefined) {
+      updateValues.discountPrice =
+        input.discountPrice != null ? String(input.discountPrice) : null;
+    }
+    if (input.stockQty !== undefined) updateValues.stockQty = input.stockQty;
+    if (input.maxBuyQty !== undefined) updateValues.maxBuyQty = input.maxBuyQty;
+    if (input.attributesJson !== undefined) updateValues.attributesJson = input.attributesJson;
+
+    const [updated] = await tx
+      .update(productVariants)
+      .set(updateValues)
+      .where(
+        and(
+          eq(productVariants.id, pVariantIdBigInt),
+          eq(productVariants.tenantId, pTenantId)
+        )
+      )
+      .returning();
+
+    if (!updated) {
+      throw new AppError(404, "Product variant not found.");
+    }
+
+    return {
+      ...updated,
+      id: updated.id.toString(),
+    };
+  });
+}
+
+/**
+ * Deletes a variant from a product.
+ */
+export async function deleteProductVariant(
+  tenantId: number | bigint,
+  userId: string,
+  variantId: number | bigint | string
+) {
+  const pTenantId = Number(tenantId);
+  const pVariantIdBigInt = BigInt(variantId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    const deleted = await tx
+      .delete(productVariants)
+      .where(
+        and(
+          eq(productVariants.id, pVariantIdBigInt),
+          eq(productVariants.tenantId, pTenantId)
+        )
+      )
+      .returning({ id: productVariants.id });
+
+    if (!deleted.length) {
+      throw new AppError(404, "Product variant not found.");
+    }
+
+    return { success: true };
+  });
 }

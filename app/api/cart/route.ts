@@ -1,44 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { toErrorResponse } from "@/lib/errors";
-import { getAuthUser } from "@/app/features/auth/auth.middleware";
 import { getCurrentTenant } from "@/lib/tenant";
-import { addToCartSchema } from "@/app/features/cart/cart.schema";
-import { listCartItems, addToCart, clearCart } from "@/app/features/cart/cart.service";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
+import {
+  getUserCart,
+  addItemToUserCart,
+  clearUserCart,
+  type AddCartItemInput,
+} from "@/app/features/cart/cart.service";
+import { AppError } from "@/lib/errors";
 
-export async function GET(req: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = getAuthUser(req);
-    const items = await withUserContext(user.id, (client) => listCartItems(client, user.id));
-    return NextResponse.json(items, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
-  }
-}
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-export async function POST(req: NextRequest) {
-  try {
-    const user = getAuthUser(req);
-    const body = await req.json();
-    const data = addToCartSchema.parse(body);
     const tenant = await getCurrentTenant();
-    await withUserContext(user.id, (client) => addToCart(client, tenant.id, user.id, data.variantId, data.quantity));
-    const items = await withUserContext(user.id, (client) => listCartItems(client, user.id));
-    return NextResponse.json(items, { status: 201 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const cart = await getUserCart(tenant.id, user.id);
+
+    return NextResponse.json(cart, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    const message = error instanceof Error ? error.message : "Failed to fetch cart";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = getAuthUser(req);
-    await withUserContext(user.id, (client) => clearCart(client, user.id));
-    return new NextResponse(null, { status: 204 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as AddCartItemInput;
+
+    if (!body?.variantId || !body?.quantity) {
+      return NextResponse.json(
+        { error: "Fields 'variantId' and 'quantity' are required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const item = await addItemToUserCart(tenant.id, user.id, body);
+
+    return NextResponse.json({ cartItem: item }, { status: 201 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    const message = error instanceof Error ? error.message : "Failed to add item to cart";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const tenant = await getCurrentTenant();
+    const result = await clearUserCart(tenant.id, user.id);
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    const message = error instanceof Error ? error.message : "Failed to clear cart";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

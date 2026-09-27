@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790483025669,
+      "tag": "0000_cynical_firebird",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790514306472,
+      "tag": "0001_demonic_prima",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790534764605,
+      "tag": "0002_faithful_blindfold",
+      "breakpoints": true
+    }
+  ]
+}
