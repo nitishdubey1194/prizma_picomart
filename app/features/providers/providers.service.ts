@@ -49,6 +49,7 @@ export async function getProvidersByService(
         name: providers.name,
         avatarUrl: providers.avatarUrl,
         isActive: providers.isActive,
+        userId: providers.userId
       })
       .from(providers)
       .where(
@@ -112,8 +113,10 @@ export async function getTenantProviders(tenantId: number | bigint) {
       isActive: providers.isActive,
       createdAt: providers.createdAt,
       updatedAt: providers.updatedAt,
+      userLinkEmail: users.email,
     })
     .from(providers)
+    .leftJoin(users, eq(providers.userId, users.id))
     .where(
       and(
         eq(providers.tenantId, pTenantId),
@@ -316,15 +319,15 @@ export async function linkUserToProvider(
 
   return await withTenantContext(pTenantId, adminUserId, async (tx) => {
     // 1. Verify user exists[cite: 1]
-    const [user] = await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, input.userId))
-      .limit(1);
+    // const [user] = await tx
+    //   .select({ id: users.id })
+    //   .from(users)
+    //   .where(eq(users.id, input.userId))
+    //   .limit(1);
 
-    if (!user) {
-      throw new AppError(404, "User account not found.");
-    }
+    // if (!user) {
+    //   throw new AppError(404, "User account not found.");
+    // }
 
     // 2. Link provider[cite: 1]
     const [updated] = await tx
