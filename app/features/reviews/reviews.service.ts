@@ -32,7 +32,7 @@ export async function createProductReview(
 ) {
   const pTenantId = Number(tenantId);
   const pOrderId = Number(input.orderId);
-  const pOrderIdBigInt = BigInt(input.orderId);
+  const pOrderIdBigInt = Number(input.orderId);
   const pProductId = Number(input.productId);
   const ratingVal = Math.round(Number(input.rating));
 
@@ -176,7 +176,7 @@ export async function updateProductReview(
   input: UpdateReviewInput
 ) {
   const pTenantId = Number(tenantId);
-  const pReviewIdBigInt = BigInt(reviewId);
+  const pReviewIdBigInt = Number(reviewId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const updatePayload: Record<string, unknown> = {

@@ -110,7 +110,7 @@ export async function getStoreById(
   storeId: number | bigint | string
 ): Promise<StoreRecord | null> {
   const pTenantId = Number(tenantId);
-  const pStoreIdBigInt = BigInt(storeId);
+  const pStoreIdBigInt = Number(storeId);
 
   const [store] = await db
     .select()
@@ -208,7 +208,7 @@ export async function updateStore(
   input: UpdateStoreInput
 ): Promise<StoreRecord> {
   const pTenantId = Number(tenantId);
-  const pStoreIdBigInt = BigInt(storeId);
+  const pStoreIdBigInt = Number(storeId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.isDefault) {
@@ -300,7 +300,7 @@ export async function deleteStore(
   storeId: number | bigint | string
 ): Promise<{ success: boolean }> {
   const pTenantId = Number(tenantId);
-  const pStoreIdBigInt = BigInt(storeId);
+  const pStoreIdBigInt = Number(storeId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const [deleted] = await tx

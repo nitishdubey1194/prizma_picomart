@@ -83,7 +83,7 @@ export async function createProductVariant(
 ) {
   const pTenantId = Number(tenantId);
   const pProductId = Number(productId);
-  const pProductIdBigInt = BigInt(productId);
+  const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // 1. Validate that the parent product belongs to this tenant[cite: 1]
@@ -136,7 +136,7 @@ export async function updateProductVariant(
   input: UpdateVariantInput
 ) {
   const pTenantId = Number(tenantId);
-  const pVariantIdBigInt = BigInt(variantId);
+  const pVariantIdBigInt = Number(variantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const updateValues: Record<string, unknown> = {
@@ -185,7 +185,7 @@ export async function deleteProductVariant(
   variantId: number | bigint | string
 ) {
   const pTenantId = Number(tenantId);
-  const pVariantIdBigInt = BigInt(variantId);
+  const pVariantIdBigInt = Number(variantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const deleted = await tx

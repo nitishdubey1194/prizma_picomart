@@ -109,7 +109,7 @@ export async function addItemToUserCart(
       .innerJoin(products, eq(products.id, productVariants.productId))
       .where(
         and(
-          eq(productVariants.id, variantIdBigInt),
+          eq(productVariants.id, Number(variantIdBigInt)),
           eq(productVariants.tenantId, pTenantId)
         )
       )

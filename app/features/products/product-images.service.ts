@@ -59,7 +59,7 @@ export async function addProductImage(
 ) {
   const pTenantId = Number(tenantId);
   const pProductId = Number(productId);
-  const pProductIdBigInt = BigInt(productId);
+  const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // 1. Verify parent product exists under this tenant[cite: 1]
@@ -121,7 +121,7 @@ export async function updateProductImage(
 ) {
   const pTenantId = Number(tenantId);
   const pProductId = Number(productId);
-  const pImageIdBigInt = BigInt(imageId);
+  const pImageIdBigInt = Number(imageId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // If setting as primary, demote existing primary images for this product[cite: 1]
@@ -175,7 +175,7 @@ export async function deleteProductImage(
 ) {
   const pTenantId = Number(tenantId);
   const pProductId = Number(productId);
-  const pImageIdBigInt = BigInt(imageId);
+  const pImageIdBigInt = Number(imageId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const deleted = await tx

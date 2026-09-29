@@ -16,7 +16,7 @@ export const paymentStatus = pgEnum("payment_status", ['pending', 'paid', 'refun
 export const orderNumberSeq = pgSequence("order_number_seq", {  startWith: "1", increment: "1", minValue: "1", maxValue: "9223372036854775807", cache: "1", cycle: false })
 
 export const users = pgTable("users", {
-	id: uuid().defaultRandom().notNull(),
+	id: uuid().defaultRandom().primaryKey().notNull(),
 	email: text().notNull(),
 	passwordHash: text("password_hash").notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -30,8 +30,8 @@ export const refreshTokens = pgTable("refresh_tokens", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	revokedAt: timestamp("revoked_at", { withTimezone: true, mode: 'string' }),
 }, (table) => [
-	uniqueIndex("refresh_tokens_token_hash_idx").using("btree", table.tokenHash.asc().nullsLast().op("text_ops")),
-	index("refresh_tokens_user_id_idx").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	uniqueIndex("refresh_tokens_token_hash_idx").using("btree", table.tokenHash.asc().nullsLast()),
+	index("refresh_tokens_user_id_idx").using("btree", table.userId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.userId],
 			foreignColumns: [users.id],
@@ -40,7 +40,7 @@ export const refreshTokens = pgTable("refresh_tokens", {
 ]);
 
 export const stores = pgTable("stores", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	name: varchar({ length: 150 }).notNull(),
@@ -76,7 +76,7 @@ export const stores = pgTable("stores", {
 
 export const services = pgTable("services", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "services_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	name: varchar({ length: 150 }).notNull(),
@@ -89,8 +89,8 @@ export const services = pgTable("services", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 }, (table) => [
-	index("idx_services_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	uniqueIndex("services_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	index("idx_services_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	uniqueIndex("services_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast(), table.slug.asc().nullsLast()),
 	foreignKey({
 			columns: [table.tenantId],
 			foreignColumns: [tenants.id],
@@ -103,7 +103,7 @@ export const services = pgTable("services", {
 
 export const providerServices = pgTable("provider_services", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "provider_services_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -114,9 +114,9 @@ export const providerServices = pgTable("provider_services", {
 	durationOverrideMinutes: integer("duration_override_minutes"),
 	isActive: boolean("is_active").default(true),
 }, (table) => [
-	index("idx_provider_services_provider_id").using("btree", table.providerId.asc().nullsLast().op("int8_ops")),
-	index("idx_provider_services_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	uniqueIndex("provider_services_provider_service_key").using("btree", table.providerId.asc().nullsLast().op("int8_ops"), table.serviceId.asc().nullsLast().op("int8_ops")),
+	index("idx_provider_services_provider_id").using("btree", table.providerId.asc().nullsLast()),
+	index("idx_provider_services_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	uniqueIndex("provider_services_provider_service_key").using("btree", table.providerId.asc().nullsLast(), table.serviceId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.providerId],
 			foreignColumns: [providers.id],
@@ -137,7 +137,7 @@ export const providerServices = pgTable("provider_services", {
 ]);
 
 export const tenantUsers = pgTable("tenant_users", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	userId: uuid("user_id").notNull(),
@@ -146,9 +146,9 @@ export const tenantUsers = pgTable("tenant_users", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("idx_tenant_users_role").using("btree", table.role.asc().nullsLast().op("enum_ops")),
-	index("idx_tenant_users_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	index("idx_tenant_users_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	index("idx_tenant_users_role").using("btree", table.role.asc().nullsLast()),
+	index("idx_tenant_users_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	index("idx_tenant_users_user_id").using("btree", table.userId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.tenantId],
 			foreignColumns: [tenants.id],
@@ -167,7 +167,7 @@ export const tenantUsers = pgTable("tenant_users", {
 
 export const providerAvailability = pgTable("provider_availability", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "provider_availability_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -177,7 +177,7 @@ export const providerAvailability = pgTable("provider_availability", {
 	endTime: time("end_time").notNull(),
 	isActive: boolean("is_active").default(true),
 }, (table) => [
-	index("idx_provider_availability_provider_id").using("btree", table.providerId.asc().nullsLast().op("int2_ops"), table.weekday.asc().nullsLast().op("int2_ops")),
+	index("idx_provider_availability_provider_id").using("btree", table.providerId.asc().nullsLast(), table.weekday.asc().nullsLast()),
 	foreignKey({
 			columns: [table.providerId],
 			foreignColumns: [providers.id],
@@ -197,7 +197,7 @@ export const providerAvailability = pgTable("provider_availability", {
 
 export const providerAvailabilityExceptions = pgTable("provider_availability_exceptions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "provider_availability_exceptions_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -208,7 +208,7 @@ export const providerAvailabilityExceptions = pgTable("provider_availability_exc
 	endTime: time("end_time"),
 	reason: varchar({ length: 255 }),
 }, (table) => [
-	index("idx_provider_exceptions_provider_id").using("btree", table.providerId.asc().nullsLast().op("date_ops"), table.exceptionDate.asc().nullsLast().op("int8_ops")),
+	index("idx_provider_exceptions_provider_id").using("btree", table.providerId.asc().nullsLast(), table.exceptionDate.asc().nullsLast()),
 	foreignKey({
 			columns: [table.providerId],
 			foreignColumns: [providers.id],
@@ -225,7 +225,7 @@ export const providerAvailabilityExceptions = pgTable("provider_availability_exc
 ]);
 
 export const userAddresses = pgTable("user_addresses", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	userId: uuid("user_id").notNull(),
@@ -251,7 +251,7 @@ export const userAddresses = pgTable("user_addresses", {
 ]);
 
 export const themes = pgTable("themes", {
-	id: serial().notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	name: text().notNull(),
 	themeJson: jsonb("theme_json").notNull(),
 	isActive: boolean("is_active").default(true),
@@ -262,7 +262,7 @@ export const themes = pgTable("themes", {
 ]);
 
 export const tenants = pgTable("tenants", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	userId: uuid("user_id").notNull(),
 	subdomain: varchar({ length: 255 }).notNull(),
 	name: varchar({ length: 255 }).notNull(),
@@ -282,11 +282,11 @@ export const tenants = pgTable("tenants", {
 
 export const userRoles = pgTable("user_roles", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedByDefaultAsIdentity({ name: "user_roles_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	userId: uuid("user_id").notNull(),
 	role: appRole().notNull(),
 }, (table) => [
-	index("idx_user_roles_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
+	index("idx_user_roles_user_id").using("btree", table.userId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.userId],
 			foreignColumns: [users.id],
@@ -298,7 +298,7 @@ export const userRoles = pgTable("user_roles", {
 ]);
 
 export const orderItems = pgTable("order_items", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	orderId: bigint("order_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -318,7 +318,7 @@ export const orderItems = pgTable("order_items", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 }, (table) => [
-	index("idx_order_items_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
+	index("idx_order_items_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.orderId],
 			foreignColumns: [orders.id],
@@ -337,7 +337,7 @@ export const orderItems = pgTable("order_items", {
 ]);
 
 export const orderReviews = pgTable("order_reviews", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -350,8 +350,8 @@ export const orderReviews = pgTable("order_reviews", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	productId: bigint("product_id", { mode: "number" }),
 }, (table) => [
-	index("idx_order_reviews_product_id").using("btree", table.productId.asc().nullsLast().op("int8_ops")),
-	index("idx_order_reviews_tenant_product").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.productId.asc().nullsLast().op("int8_ops")),
+	index("idx_order_reviews_product_id").using("btree", table.productId.asc().nullsLast()),
+	index("idx_order_reviews_tenant_product").using("btree", table.tenantId.asc().nullsLast(), table.productId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.orderId],
 			foreignColumns: [orders.id],
@@ -377,7 +377,7 @@ export const orderReviews = pgTable("order_reviews", {
 ]);
 
 export const categories = pgTable("categories", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	name: varchar({ length: 150 }).notNull(),
@@ -389,7 +389,7 @@ export const categories = pgTable("categories", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 }, (table) => [
-	uniqueIndex("categories_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	uniqueIndex("categories_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast(), table.slug.asc().nullsLast()),
 	foreignKey({
 			columns: [table.parentId],
 			foreignColumns: [table.id],
@@ -405,7 +405,7 @@ export const categories = pgTable("categories", {
 
 export const bookingCategories = pgTable("booking_categories", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "booking_categories_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	name: varchar({ length: 100 }).notNull(),
@@ -415,7 +415,7 @@ export const bookingCategories = pgTable("booking_categories", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("idx_booking_categories_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
+	index("idx_booking_categories_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.tenantId],
 			foreignColumns: [tenants.id],
@@ -426,7 +426,7 @@ export const bookingCategories = pgTable("booking_categories", {
 ]);
 
 export const announcements = pgTable("announcements", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -449,7 +449,7 @@ export const announcements = pgTable("announcements", {
 ]);
 
 export const productImages = pgTable("product_images", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	productId: bigint("product_id", { mode: "number" }).notNull(),
 	imageUrl: varchar("image_url", { length: 255 }).notNull(),
@@ -458,8 +458,8 @@ export const productImages = pgTable("product_images", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 }, (table) => [
-	index("idx_product_images_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	uniqueIndex("product_images_one_primary_per_product").using("btree", table.productId.asc().nullsLast().op("int8_ops")).where(sql`(is_primary = true)`),
+	index("idx_product_images_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	uniqueIndex("product_images_one_primary_per_product").using("btree", table.productId.asc().nullsLast()).where(sql`(is_primary = true)`),
 	foreignKey({
 			columns: [table.productId],
 			foreignColumns: [products.id],
@@ -469,7 +469,7 @@ export const productImages = pgTable("product_images", {
 ]);
 
 export const productVariants = pgTable("product_variants", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	productId: bigint("product_id", { mode: "number" }).notNull(),
 	variantName: varchar("variant_name", { length: 100 }).notNull(),
@@ -484,7 +484,7 @@ export const productVariants = pgTable("product_variants", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 }, (table) => [
-	index("idx_product_variants_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
+	index("idx_product_variants_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.productId],
 			foreignColumns: [products.id],
@@ -506,7 +506,7 @@ export const productTags = pgTable("product_tags", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 }, (table) => [
-	index("idx_product_tags_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
+	index("idx_product_tags_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.productId],
 			foreignColumns: [products.id],
@@ -520,7 +520,7 @@ export const productTags = pgTable("product_tags", {
 ]);
 
 export const plans = pgTable("plans", {
-	id: serial().notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	name: varchar({ length: 100 }).notNull(),
 	slug: varchar({ length: 100 }).notNull(),
 	description: text(),
@@ -538,7 +538,7 @@ export const plans = pgTable("plans", {
 ]);
 
 export const orders = pgTable("orders", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	userId: uuid("user_id").notNull(),
@@ -597,10 +597,10 @@ export const userCarts = pgTable("user_carts", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "user_carts_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity(),
 }, (table) => [
-	index("idx_user_carts_tenant_user").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.userId.asc().nullsLast().op("int8_ops")),
-	uniqueIndex("user_carts_user_variant_key").using("btree", table.userId.asc().nullsLast().op("int8_ops"), table.variantId.asc().nullsLast().op("int8_ops")),
+	index("idx_user_carts_tenant_user").using("btree", table.tenantId.asc().nullsLast(), table.userId.asc().nullsLast()),
+	uniqueIndex("user_carts_user_variant_key").using("btree", table.userId.asc().nullsLast(), table.variantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.tenantId],
 			foreignColumns: [tenants.id],
@@ -621,7 +621,7 @@ export const userCarts = pgTable("user_carts", {
 
 export const providers = pgTable("providers", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "providers_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	userId: uuid("user_id"),
@@ -635,8 +635,8 @@ export const providers = pgTable("providers", {
 	slug: varchar({ length: 150 }).notNull(),
 	category: varchar({ length: 100 }).notNull(),
 }, (table) => [
-	index("idx_providers_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	uniqueIndex("providers_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.slug.asc().nullsLast().op("int8_ops")),
+	index("idx_providers_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	uniqueIndex("providers_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast(), table.slug.asc().nullsLast()),
 	foreignKey({
 			columns: [table.tenantId],
 			foreignColumns: [tenants.id],
@@ -652,7 +652,7 @@ export const providers = pgTable("providers", {
 ]);
 
 export const menus = pgTable("menus", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	menuType: menuType("menu_type").notNull(),
@@ -666,8 +666,8 @@ export const menus = pgTable("menus", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 }, (table) => [
-	index("idx_menus_parent").using("btree", table.parentId.asc().nullsLast().op("int8_ops")),
-	index("idx_navigation_menus_active_position").using("btree", table.isActive.asc().nullsLast().op("int4_ops"), table.sortOrder.asc().nullsLast().op("int4_ops")),
+	index("idx_menus_parent").using("btree", table.parentId.asc().nullsLast()),
+	index("idx_navigation_menus_active_position").using("btree", table.isActive.asc().nullsLast(), table.sortOrder.asc().nullsLast()),
 	foreignKey({
 			columns: [table.parentId],
 			foreignColumns: [table.id],
@@ -682,7 +682,7 @@ export const menus = pgTable("menus", {
 ]);
 
 export const orderStatusLogs = pgTable("order_status_logs", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	orderId: bigint("order_id", { mode: "number" }).notNull(),
 	status: varchar({ length: 50 }).notNull(),
@@ -692,7 +692,7 @@ export const orderStatusLogs = pgTable("order_status_logs", {
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	changedBy: uuid("changed_by"),
 }, (table) => [
-	index("idx_order_status_logs_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
+	index("idx_order_status_logs_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.orderId],
 			foreignColumns: [orders.id],
@@ -706,7 +706,7 @@ export const orderStatusLogs = pgTable("order_status_logs", {
 ]);
 
 export const products = pgTable("products", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -722,7 +722,7 @@ export const products = pgTable("products", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 }, (table) => [
-	uniqueIndex("products_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast().op("int8_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	uniqueIndex("products_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast(), table.slug.asc().nullsLast()),
 	foreignKey({
 			columns: [table.categoryId],
 			foreignColumns: [categories.id],
@@ -768,17 +768,17 @@ export const profiles = pgTable("profiles", {
 
 export const rolePermissions = pgTable("role_permissions", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedByDefaultAsIdentity({ name: "role_permissions_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).generatedByDefaultAsIdentity({ name: "role_permissions_id_seq", startWith: 1, increment: 1, minValue: 1, cache: 1 }),
 	role: appRole().notNull(),
 	permission: appPermission().notNull(),
 }, (table) => [
-	index("idx_role_permissions_role_id").using("btree", table.role.asc().nullsLast().op("enum_ops")),
+	index("idx_role_permissions_role_id").using("btree", table.role.asc().nullsLast()),
 	pgPolicy("super admin full access role_permissions", { as: "permissive", for: "all", to: ["public"], using: sql`has_role('super_admin'::app_role)`, withCheck: sql`has_role('super_admin'::app_role)`  }),
 	pgPolicy("admin view role permissions", { as: "permissive", for: "select", to: ["public"] }),
 ]);
 
 export const tags = pgTable("tags", {
-	id: bigserial({ mode: "bigint" }).notNull(),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	name: varchar({ length: 100 }).notNull(),
@@ -794,7 +794,7 @@ export const tags = pgTable("tags", {
 
 export const appointmentStatusLogs = pgTable("appointment_status_logs", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "appointment_status_logs_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -804,7 +804,7 @@ export const appointmentStatusLogs = pgTable("appointment_status_logs", {
 	changedBy: uuid("changed_by"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-	index("idx_appointment_status_logs_appt_id").using("btree", table.appointmentId.asc().nullsLast().op("int8_ops")),
+	index("idx_appointment_status_logs_appt_id").using("btree", table.appointmentId.asc().nullsLast()),
 	foreignKey({
 			columns: [table.appointmentId],
 			foreignColumns: [appointments.id],
@@ -830,7 +830,7 @@ export const appointmentStatusLogs = pgTable("appointment_status_logs", {
 
 export const appointments = pgTable("appointments", {
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
-	id: bigint({ mode: "number" }).generatedAlwaysAsIdentity({ name: "appointments_id_seq", startWith: 1, increment: 1, minValue: 1, maxValue: 9223372036854775807, cache: 1 }),
+	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
 	tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
 	// You can use { mode: "bigint" } if numbers are exceeding js number limitations
@@ -850,10 +850,10 @@ export const appointments = pgTable("appointments", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 	localDate: date("local_date").notNull(),
 }, (table) => [
-	index("idx_appointments_provider_time").using("btree", table.providerId.asc().nullsLast().op("int8_ops"), table.startTime.asc().nullsLast().op("int8_ops")),
-	index("idx_appointments_tenant_id").using("btree", table.tenantId.asc().nullsLast().op("int8_ops")),
-	index("idx_appointments_user_id").using("btree", table.userId.asc().nullsLast().op("uuid_ops")),
-	uniqueIndex("one_appointment_per_provider_per_day").using("btree", table.providerId.asc().nullsLast().op("uuid_ops"), table.userId.asc().nullsLast().op("uuid_ops"), table.localDate.asc().nullsLast().op("int8_ops")).where(sql`(status <> 'cancelled'::booking_status)`),
+	index("idx_appointments_provider_time").using("btree", table.providerId.asc().nullsLast(), table.startTime.asc().nullsLast()),
+	index("idx_appointments_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
+	index("idx_appointments_user_id").using("btree", table.userId.asc().nullsLast()),
+	uniqueIndex("one_appointment_per_provider_per_day").using("btree", table.providerId.asc().nullsLast(), table.userId.asc().nullsLast(), table.localDate.asc().nullsLast()).where(sql`(status <> 'cancelled'::booking_status)`),
 	foreignKey({
 			columns: [table.providerId],
 			foreignColumns: [providers.id],

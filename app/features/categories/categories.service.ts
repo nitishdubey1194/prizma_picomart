@@ -61,7 +61,7 @@ export async function getCategoryById(
   categoryId: number | bigint | string
 ) {
   const pTenantId = Number(tenantId);
-  const pCategoryIdBigInt = BigInt(categoryId);
+  const pCategoryIdBigInt = Number(categoryId);
 
   const [category] = await db
     .select()
@@ -119,7 +119,7 @@ export async function createCategory(
         .from(categories)
         .where(
           and(
-            eq(categories.id, BigInt(input.parentId)),
+            eq(categories.id, Number(input.parentId)),
             eq(categories.tenantId, pTenantId)
           )
         )
@@ -204,7 +204,7 @@ export async function updateCategory(
       .set(updatePayload)
       .where(
         and(
-          eq(categories.id, pCategoryIdBigInt),
+          eq(categories.id, Number(pCategoryIdBigInt)),
           eq(categories.tenantId, pTenantId)
         )
       )
@@ -241,7 +241,7 @@ export async function deleteCategory(
       })
       .where(
         and(
-          eq(categories.id, pCategoryIdBigInt),
+          eq(categories.id, Number(pCategoryIdBigInt)),
           eq(categories.tenantId, pTenantId)
         )
       )

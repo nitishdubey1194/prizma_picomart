@@ -146,7 +146,7 @@ export async function updateUserAddress(
       .set(updatePayload)
       .where(
         and(
-          eq(userAddresses.id, pAddressIdBigInt),
+          eq(userAddresses.id, Number(pAddressIdBigInt)),
           eq(userAddresses.tenantId, pTenantId),
           eq(userAddresses.userId, userId)
         )
@@ -177,7 +177,7 @@ export async function deleteUserAddress(
       .delete(userAddresses)
       .where(
         and(
-          eq(userAddresses.id, pAddressIdBigInt),
+          eq(userAddresses.id, Number(pAddressIdBigInt)),
           eq(userAddresses.tenantId, pTenantId),
           eq(userAddresses.userId, userId)
         )

@@ -100,7 +100,7 @@ export async function getTenantBySubdomain(
 export async function getTenantById(
   tenantId: number | bigint | string
 ): Promise<TenantWithTheme | null> {
-  const pTenantIdBigInt = BigInt(tenantId);
+  const pTenantIdBigInt = Number(tenantId);
 
   const [row] = await db
     .select({
@@ -237,7 +237,7 @@ export async function updateTenant(
   input: UpdateTenantInput
 ) {
   const pTenantId = Number(tenantId);
-  const pTenantIdBigInt = BigInt(tenantId);
+  const pTenantIdBigInt = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // 1. Check subdomain collisions if updating[cite: 1]

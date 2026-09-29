@@ -22,7 +22,7 @@ export interface CreateOrderInput {
 }
 
 export interface OrderItemSummary {
-  id: bigint;
+  id: number;
   orderId: number;
   productId: number;
   variantId: number;
@@ -34,7 +34,7 @@ export interface OrderItemSummary {
 }
 
 export interface OrderWithItems {
-  id: bigint;
+  id: number;
   orderNumber: string;
   status: "pending" | "confirmed" | "processing" | "shipped" | "delivered" | "cancelled" | "returned" | "failed" | "out_for_delivery";
   paymentStatus: "pending" | "paid" | "refunded" | "failed";
@@ -71,10 +71,10 @@ export async function createOrderFromCart(
   tenantId: number | bigint,
   userId: string,
   input: CreateOrderInput
-): Promise<{ orderId: bigint; orderNumber: string }> {
+): Promise<{ orderId: number; orderNumber: string }> {
   const pTenantId = Number(tenantId);
   const pAddressId = Number(input.addressId);
-  const pAddressIdBigInt = BigInt(input.addressId);
+  const pAddressIdBigInt = Number(input.addressId);
   const pStoreId = input.storeId ? Number(input.storeId) : null;
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
@@ -257,7 +257,7 @@ export async function getOrderById(
   orderId: number | bigint | string
 ): Promise<OrderWithItems | null> {
   const pTenantId = Number(tenantId);
-  const pOrderIdBigInt = BigInt(orderId);
+  const pOrderIdBigInt = Number(orderId);
   const pOrderIdNum = Number(orderId);
 
   const [order] = await db
@@ -351,7 +351,7 @@ export async function updateOrderStatus(
   input: UpdateOrderStatusInput
 ) {
   const pTenantId = Number(tenantId);
-  const pOrderIdBigInt = BigInt(orderId);
+  const pOrderIdBigInt = Number(orderId);
   const pOrderIdNum = Number(orderId);
 
   return await withTenantContext(pTenantId, adminUserId, async (tx) => {
@@ -434,7 +434,7 @@ export async function updateOrderStatus(
             stockQty: sql`${productVariants.stockQty} + ${item.quantity}`,
             updatedAt: sql`now()`,
           })
-          .where(eq(productVariants.id, BigInt(item.variantId)));
+          .where(eq(productVariants.id, Number(item.variantId)));
       }
     }
 

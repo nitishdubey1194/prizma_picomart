@@ -112,7 +112,7 @@ export async function createMenuItem(
         .from(menus)
         .where(
           and(
-            eq(menus.id, BigInt(input.parentId)),
+            eq(menus.id, Number(input.parentId)),
             eq(menus.tenantId, pTenantId)
           )
         )
@@ -155,11 +155,11 @@ export async function updateMenuItem(
   input: UpdateMenuItemInput
 ) {
   const pTenantId = Number(tenantId);
-  const pItemIdBigInt = BigInt(itemId);
+  const pItemIdBigInt = Number(itemId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // Prevent setting self as parent[cite: 1]
-    if (input.parentId != null && BigInt(input.parentId) === pItemIdBigInt) {
+    if (input.parentId != null && Number(input.parentId) === pItemIdBigInt) {
       throw new AppError(400, "A menu item cannot be its own parent.");
     }
 
@@ -208,7 +208,7 @@ export async function deleteMenuItem(
   itemId: number | bigint | string
 ) {
   const pTenantId = Number(tenantId);
-  const pItemIdBigInt = BigInt(itemId);
+  const pItemIdBigInt = Number(itemId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const deleted = await tx
