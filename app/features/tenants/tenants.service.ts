@@ -204,7 +204,7 @@ export async function createTenant(
     const [newTenant] = await tx
       .insert(tenants)
       .values({
-        userId: ownerUserId,
+        // userId: ownerUserId,
         subdomain: cleanSubdomain,
         name: input.name,
         planId: input.planId,

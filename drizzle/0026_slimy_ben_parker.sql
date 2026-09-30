@@ -1,0 +1,2 @@
+ALTER TABLE "refresh_tokens" ADD COLUMN "tenant_id" bigint NOT NULL;--> statement-breakpoint
+ALTER TABLE "refresh_tokens" ADD CONSTRAINT "refresh_tokens_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;

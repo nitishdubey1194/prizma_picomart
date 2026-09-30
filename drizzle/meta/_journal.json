@@ -155,6 +155,41 @@
       "when": 1790707037314,
       "tag": "0021_certain_lockheed",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790789222035,
+      "tag": "0022_ancient_bastion",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790789541745,
+      "tag": "0023_mysterious_zaran",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790789576165,
+      "tag": "0024_little_mimic",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790790858889,
+      "tag": "0025_thin_wild_child",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790791399984,
+      "tag": "0026_slimy_ben_parker",
+      "breakpoints": true
     }
   ]
 }

@@ -15,16 +15,45 @@ export const paymentStatus = pgEnum("payment_status", ['pending', 'paid', 'refun
 
 export const orderNumberSeq = pgSequence("order_number_seq", {  startWith: "1", increment: "1", minValue: "1", maxValue: "9223372036854775807", cache: "1", cycle: false })
 
-export const users = pgTable("users", {
-	id: uuid().defaultRandom().primaryKey().notNull(),
-	email: text().notNull(),
-	passwordHash: text("password_hash").notNull(),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").defaultRandom().primaryKey().notNull(),
+    tenantId: bigint("tenant_id", { mode: "number" }).notNull(),
+    fullname: text("fullname").notNull(),
+    email: text("email").notNull(),
+    mobile: text("mobile").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex("users_tenant_email_mobile_unique_idx").on(
+		t.tenantId,
+		t.email,
+		t.mobile
+	),
+
+    // RLS Policies
+    pgPolicy("Allow public user registration for tenant", {
+      for: "insert",
+      withCheck: sql`${t.tenantId} = nullif(current_setting('request.tenant_id', true), '')::bigint`,
+    }),
+
+    pgPolicy("Allow user to read own profile", {
+      for: "select",
+      using: sql`${t.id} = nullif(current_setting('app.current_user_id', true), '')::uuid`,
+    }),
+  ]
+).enableRLS();
 
 export const refreshTokens = pgTable("refresh_tokens", {
 	id: uuid().defaultRandom().notNull(),
 	userId: uuid("user_id").notNull(),
+	tenantId: bigint("tenant_id", { mode: "number" })
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
 	tokenHash: text("token_hash").notNull(),
 	expiresAt: timestamp("expires_at", { withTimezone: true, mode: 'string' }).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
@@ -263,7 +292,6 @@ export const themes = pgTable("themes", {
 
 export const tenants = pgTable("tenants", {
 	id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-	userId: uuid("user_id").notNull(),
 	subdomain: varchar({ length: 255 }).notNull(),
 	name: varchar({ length: 255 }).notNull(),
 	planId: integer("plan_id").notNull(),
@@ -272,11 +300,6 @@ export const tenants = pgTable("tenants", {
 	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow(),
 }, (table) => [
-	foreignKey({
-			columns: [table.userId],
-			foreignColumns: [users.id],
-			name: "tenants_user_id_fkey"
-		}).onDelete("cascade"),
 	pgPolicy("Allow public read active tenants", { as: "permissive", for: "select", to: ["public"], using: sql`(is_active = true)` }),
 ]);
 

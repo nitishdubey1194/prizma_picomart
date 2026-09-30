@@ -24,19 +24,27 @@ export type DrizzleTransaction = PgTransaction<
  * Fetches the first tenant row for single-tenant mode or subdomain lookup.
  */
 export async function getCurrentTenant(): Promise<Tenant> {
-  const result = await db.query.tenants.findFirst({
-    columns: {
-      id: true,
-      name: true,
-      subdomain: true,
-    },
-  });
+  try {
+    const tenant = await db.query.tenants.findFirst({
+      columns: {
+        id: true,
+        name: true,
+        subdomain: true,
+      },
+    });
 
-  if (!result) {
-    throw new AppError(404, "Tenant not found.");
+    // findFirst returns undefined when no record matches
+    if (!tenant) {
+      throw new AppError(404, "Tenant not foundss.");
+    }
+
+    return tenant;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+
+    console.error("Database error in getCurrentTenant:", error);
+    throw new AppError(500, "Failed to resolve tenant.");
   }
-
-  return result as Tenant;
 }
 
 /**
