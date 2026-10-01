@@ -4,6 +4,13 @@ import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql } from "drizzle-orm";
 
+export interface AssignServiceWithOverridesInput {
+  serviceId: number;
+  priceOverride?: string | null;
+  durationOverrideMinutes?: number | null;
+  isActive?: boolean;
+}
+
 export interface AssignServiceToProviderInput {
   serviceId: number | bigint | string;
   priceOverride?: string | number | null;
@@ -218,5 +225,56 @@ export async function removeServiceFromProvider(
     }
 
     return { success: true };
+  });
+}
+
+export async function upsertProviderService(
+  tenantId: number | bigint,
+  userId: string,
+  providerId: number | bigint,
+  input: AssignServiceWithOverridesInput
+) {
+  const pTenantId = Number(tenantId);
+  const pProviderId = Number(providerId);
+
+  return await withTenantContext(pTenantId, userId, async (tx) => {
+    const [existing] = await tx
+      .select({ id: providerServices.id })
+      .from(providerServices)
+      .where(
+        and(
+          eq(providerServices.tenantId, pTenantId),
+          eq(providerServices.providerId, pProviderId),
+          eq(providerServices.serviceId, input.serviceId)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await tx
+        .update(providerServices)
+        .set({
+          priceOverride: input.priceOverride ?? null,
+          durationOverrideMinutes: input.durationOverrideMinutes ?? null,
+          isActive: input.isActive ?? true,
+        })
+        .where(eq(providerServices.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [inserted] = await tx
+      .insert(providerServices)
+      .values({
+        tenantId: pTenantId,
+        providerId: pProviderId,
+        serviceId: input.serviceId,
+        priceOverride: input.priceOverride ?? null,
+        durationOverrideMinutes: input.durationOverrideMinutes ?? null,
+        isActive: input.isActive ?? true,
+      })
+      .returning();
+
+    return inserted;
   });
 }

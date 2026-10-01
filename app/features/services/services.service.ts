@@ -94,9 +94,13 @@ export async function createService(
   }
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify slug uniqueness for this tenant[cite: 1]
+    // 1. Verify slug uniqueness and retrieve existing fallback values
     const [existingSlug] = await tx
-      .select({ id: services.id })
+      .select({
+        id: services.id,
+        bufferMinutes: services.bufferMinutes,
+        description: services.description,
+      })
       .from(services)
       .where(
         and(
@@ -107,10 +111,24 @@ export async function createService(
       .limit(1);
 
     if (existingSlug) {
-      throw new AppError(409, "A service with this slug already exists.");
+      const [reactivated] = await tx
+        .update(services)
+        .set({
+          name: input.name,
+          durationMinutes: input.durationMinutes,
+          price: String(input.price),
+          bufferMinutes: input.bufferMinutes ?? existingSlug.bufferMinutes ?? 0,
+          description: input.description !== undefined ? input.description : existingSlug.description,
+          isActive: true, // Re-enables the service if it was previously soft-deleted/disabled
+          updatedAt: sql`now()`,
+        })
+        .where(eq(services.id, existingSlug.id))
+        .returning();
+
+      return reactivated;
     }
 
-    // 2. Insert service[cite: 1]
+    // 2. Insert new service
     const [newService] = await tx
       .insert(services)
       .values({

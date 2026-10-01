@@ -111,6 +111,7 @@ export const services = pgTable("services", {
 	name: varchar({ length: 150 }).notNull(),
 	slug: varchar({ length: 150 }).notNull(),
 	description: text(),
+	category: varchar({ length: 100 }).notNull().default("general"),
 	durationMinutes: integer("duration_minutes").notNull(),
 	price: numeric({ precision: 10, scale:  2 }).default('0').notNull(),
 	bufferMinutes: integer("buffer_minutes").default(0).notNull(),
