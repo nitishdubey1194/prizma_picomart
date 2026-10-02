@@ -1,32 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { toErrorResponse } from "@/lib/errors";
-import { getAuthUser, getOptionalAuthUser } from "@/app/features/auth/auth.middleware";
 import { getCurrentTenant } from "@/lib/tenant";
-import { createServiceSchema } from "@/app/features/services/services.schema";
-import { listServices, createService } from "@/app/features/services/services.service";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
+import {
+  getTenantServices,
+  createService,
+  type CreateServiceInput,
+} from "@/app/features/services/services.service";
+import { AppError } from "@/lib/errors";
 
-export async function GET(req: NextRequest) {
+export async function GET(_request: NextRequest): Promise<NextResponse> {
   try {
-    const user = getOptionalAuthUser(req);
-    const services = await withUserContext(user?.id ?? null, (client) => listServices(client));
-    return NextResponse.json(services, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const tenant = await getCurrentTenant();
+    const list = await getTenantServices(tenant.id);
+
+    return NextResponse.json({ services: list }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to fetch services";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = getAuthUser(req);
-    const body = await req.json();
-    const data = createServiceSchema.parse(body);
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as CreateServiceInput;
+
+    if (!body?.name || !body?.slug || body?.durationMinutes == null || body?.price == null) {
+      return NextResponse.json(
+        { error: "Fields 'name', 'slug', 'durationMinutes', and 'price' are required" },
+        { status: 400 }
+      );
+    }
+
     const tenant = await getCurrentTenant();
-    const service = await withUserContext(user.id, (client) => createService(client, tenant.id, data));
-    return NextResponse.json(service, { status: 201 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const service = await createService(tenant.id, user.id, body);
+
+    return NextResponse.json({ service }, { status: 201 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to create service";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

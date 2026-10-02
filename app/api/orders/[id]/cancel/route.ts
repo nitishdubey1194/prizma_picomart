@@ -1,24 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { toErrorResponse } from "@/lib/errors";
-import { getAuthUser } from "@/app/features/auth/auth.middleware";
-import { cancelOrderSchema } from "@/app/features/orders/orders.schema";
-import { cancelOrder } from "@/app/features/orders/orders.service";
+import { getCurrentTenant } from "@/lib/tenant";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
+import { updateOrderStatus } from "@/app/features/orders/orders.service";
+import { AppError } from "@/lib/errors";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function POST(req: NextRequest, { params }: RouteParams) {
+export async function POST(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const body = await req.json().catch(() => ({}));
-    const data = cancelOrderSchema.parse(body);
-    await withUserContext(user.id, (client) => cancelOrder(client, Number(id), data.reason));
-    return new NextResponse(null, { status: 204 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const orderId = Number(id);
+
+    if (!orderId) {
+      return NextResponse.json(
+        { error: "A valid order ID is required" },
+        { status: 400 }
+      );
+    }
+
+    let remarks = "Order cancelled by customer.";
+    try {
+      const body = await request.json();
+      if (body?.remarks) remarks = body.remarks;
+    } catch {
+      // Body is optional
+    }
+
+    const tenant = await getCurrentTenant();
+
+    const result = await updateOrderStatus(tenant.id, user.id, orderId, {
+      status: "cancelled",
+      remarks,
+    });
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to cancel order";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

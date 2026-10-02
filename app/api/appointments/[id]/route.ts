@@ -1,22 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { AppError, toErrorResponse } from "@/lib/errors";
-import { getAuthUser } from "@/app/features/auth/auth.middleware";
+import { getCurrentTenant } from "@/lib/tenant";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { getAppointmentById } from "@/app/features/appointments/appointments.service";
+import { AppError } from "@/lib/errors";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const appointment = await withUserContext(user.id, (client) => getAppointmentById(client, Number(id)));
-    if (!appointment) throw new AppError(404, "Appointment not found.");
-    return NextResponse.json(appointment, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const appointmentId = Number(id);
+
+    if (!appointmentId) {
+      return NextResponse.json(
+        { error: "A valid appointment ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const appointment = await getAppointmentById(tenant.id, user.id, appointmentId);
+
+    if (!appointment) {
+      return NextResponse.json(
+        { error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ appointment }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to load appointment";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

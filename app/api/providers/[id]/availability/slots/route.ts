@@ -1,40 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { toErrorResponse } from "@/lib/errors";
-import { getOptionalAuthUser } from "@/app/features/auth/auth.middleware";
-import { getAvailableSlots } from "@/app/features/availability/availability.service";
-import { getServiceById } from "@/app/features/services/services.service"; // adjust to your actual export name
+import { getCurrentTenant } from "@/lib/tenant";
+import { generateAvailableSlots } from "@/app/features/availability/generate-slots";
+import { AppError } from "@/lib/errors";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
     const { id } = await params;
-    const date = req.nextUrl.searchParams.get("date");
-    const serviceIdParam = req.nextUrl.searchParams.get("serviceId");
+    const providerId = Number(id);
 
-    if (!date || !serviceIdParam) {
-      return NextResponse.json({ message: "date and serviceId are required" }, { status: 400 });
+    const { searchParams } = new URL(request.url);
+    const serviceId = searchParams.get("serviceId");
+    const date = searchParams.get("date"); // YYYY-MM-DD
+
+    if (!providerId || !serviceId || !date) {
+      return NextResponse.json(
+        { error: "Parameters 'serviceId' and 'date' (YYYY-MM-DD) are required" },
+        { status: 400 }
+      );
     }
 
-    const user = getOptionalAuthUser(req);
+    const tenant = await getCurrentTenant();
 
-    const service = await withUserContext(user?.id ?? null, (client) =>
-      getServiceById(client, Number(serviceIdParam))
-    );
-    if (!service) {
-      return NextResponse.json({ message: "Service not found" }, { status: 404 });
+    const slots = await generateAvailableSlots({
+      tenantId: tenant.id,
+      providerId,
+      serviceId: Number(serviceId),
+      date,
+    });
+
+    return NextResponse.json({ slots }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
-
-    const slots = await withUserContext(user?.id ?? null, (client) =>
-      getAvailableSlots(client, Number(id), date, service.durationMinutes)
-    );
-
-    return NextResponse.json(slots, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const message = error instanceof Error ? error.message : "Failed to calculate slots";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

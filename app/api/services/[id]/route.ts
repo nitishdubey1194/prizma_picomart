@@ -1,51 +1,126 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withUserContext } from "@/lib/db";
-import { AppError, toErrorResponse } from "@/lib/errors";
-import { getAuthUser, getOptionalAuthUser } from "@/app/features/auth/auth.middleware";
-import { updateServiceSchema } from "@/app/features/services/services.schema";
-import { getServiceById, updateService, deleteService } from "@/app/features/services/services.service";
+import { getCurrentTenant } from "@/lib/tenant";
+import { getAuthUser } from "@/app/features/auth/auth.utils";
+import {
+  getServiceById,
+  updateService,
+  deleteService,
+  type UpdateServiceInput,
+} from "@/app/features/services/services.service";
+import { AppError } from "@/lib/errors";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export async function GET(
+  _request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
     const { id } = await params;
-    const user = getOptionalAuthUser(req);
-    const service = await withUserContext(user?.id ?? null, (client) => getServiceById(client, Number(id)));
-    if (!service) throw new AppError(404, "Service not found.");
-    return NextResponse.json(service, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const serviceId = Number(id);
+
+    if (!serviceId) {
+      return NextResponse.json(
+        { error: "A valid service ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const service = await getServiceById(tenant.id, serviceId);
+
+    if (!service) {
+      return NextResponse.json({ error: "Service not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ service }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to fetch service";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
-export async function PATCH(req: NextRequest, { params }: RouteParams) {
+export async function PATCH(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const body = await req.json();
-    const data = updateServiceSchema.parse(body);
-    const service = await withUserContext(user.id, (client) => updateService(client, Number(id), data));
-    if (!service) throw new AppError(404, "Service not found.");
-    return NextResponse.json(service, { status: 200 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const serviceId = Number(id);
+
+    if (!serviceId) {
+      return NextResponse.json(
+        { error: "A valid service ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const body = (await request.json()) as UpdateServiceInput;
+    const tenant = await getCurrentTenant();
+
+    const updated = await updateService(tenant.id, user.id, serviceId, body);
+
+    return NextResponse.json({ service: updated }, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to update service";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: RouteParams) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: RouteParams
+): Promise<NextResponse> {
   try {
+    const user = await getAuthUser(request);
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { id } = await params;
-    const user = getAuthUser(req);
-    const deleted = await withUserContext(user.id, (client) => deleteService(client, Number(id)));
-    if (!deleted) throw new AppError(404, "Service not found.");
-    return new NextResponse(null, { status: 204 });
-  } catch (err: unknown) {
-    const { status, message } = toErrorResponse(err);
-    return NextResponse.json({ message }, { status });
+    const serviceId = Number(id);
+
+    if (!serviceId) {
+      return NextResponse.json(
+        { error: "A valid service ID is required" },
+        { status: 400 }
+      );
+    }
+
+    const tenant = await getCurrentTenant();
+    const result = await deleteService(tenant.id, user.id, serviceId);
+
+    return NextResponse.json(result, { status: 200 });
+  } catch (error: unknown) {
+    if (error instanceof AppError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 }
+      );
+    }
+    const message =
+      error instanceof Error ? error.message : "Failed to delete service";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

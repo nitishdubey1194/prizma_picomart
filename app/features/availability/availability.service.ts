@@ -1,159 +1,313 @@
-import { PoolClient } from "pg";
-import { AvailabilityBlock, AvailabilityException } from "./availability.types";
-import { generateSlots } from "./generate-slots";
+import { db } from "@/lib/db";
+import {
+  providerAvailability,
+  providerAvailabilityExceptions,
+  providers,
+} from "@/drizzle/schema";
+import { withTenantContext } from "@/lib/tenant";
+import { AppError } from "@/lib/errors";
+import { and, eq, asc } from "drizzle-orm";
 
-function mapBlock(row: {id: string; tenant_id: string; provider_id: string; weekday: number; start_time: string; end_time: string; is_active: boolean}): AvailabilityBlock {
-  return {
-    id: Number(row.id),
-    tenantId: Number(row.tenant_id),
-    providerId: Number(row.provider_id),
-    weekday: row.weekday,
-    startTime: row.start_time,
-    endTime: row.end_time,
-    isActive: row.is_active,
-  };
+export interface RecurringBlockInput {
+  weekday: number; // 0 (Sun) to 6 (Sat)
+  startTime: string; // HH:MM or HH:MM:SS
+  endTime: string;   // HH:MM or HH:MM:SS
+  isActive?: boolean;
 }
 
-function mapException(row: {id: string; tenant_id: string; provider_id: string; exception_date: string; is_available: boolean; start_time: string | null; end_time: string | null; reason: string | null}): AvailabilityException {
-  return {
-    id: Number(row.id),
-    tenantId: Number(row.tenant_id),
-    providerId: Number(row.provider_id),
-    exceptionDate: row.exception_date,
-    isAvailable: row.is_available,
-    startTime: row.start_time,
-    endTime: row.end_time,
-    reason: row.reason,
-  };
+export interface DateExceptionInput {
+  exceptionDate: string; // YYYY-MM-DD
+  isAvailable: boolean;
+  startTime?: string | null;
+  endTime?: string | null;
+  reason?: string | null;
 }
 
-export async function listAvailabilityBlocks(client: PoolClient, providerId: number): Promise<AvailabilityBlock[]> {
-  const result = await client.query(
-    "select * from provider_availability where provider_id = $1 order by weekday, start_time",
-    [providerId]
-  );
-  return result.rows.map(mapBlock);
+export interface ProviderAvailabilityRecord {
+  id: number;
+  tenantId: number;
+  providerId: number;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  isActive: boolean | null;
 }
 
-export async function createAvailabilityBlock(
-  client: PoolClient,
-  tenantId: number,
-  providerId: number,
-  data: { weekday: number; startTime: string; endTime: string }
-): Promise<AvailabilityBlock> {
-  const result = await client.query(
-    `insert into provider_availability (tenant_id, provider_id, weekday, start_time, end_time)
-     values ($1, $2, $3, $4, $5)
-     returning *`,
-    [tenantId, providerId, data.weekday, data.startTime, data.endTime]
-  );
-  return mapBlock(result.rows[0]);
+export interface ProviderExceptionRecord {
+  id: number;
+  tenantId: number;
+  providerId: number;
+  exceptionDate: string;
+  isAvailable: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  reason: string | null;
 }
 
-export async function updateAvailabilityBlock(
-  client: PoolClient,
-  id: number,
-  data: Partial<{ weekday: number; startTime: string; endTime: string; isActive: boolean }>
-): Promise<AvailabilityBlock | null> {
-  const columnMap: Record<string, string> = {
-    weekday: "weekday",
-    startTime: "start_time",
-    endTime: "end_time",
-    isActive: "is_active",
-  };
+export interface DeleteOperationResult {
+  success: true;
+}
 
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let i = 1;
+/**
+ * Normalizes input ID into number matching Drizzle's PgBigInt53 (mode: "number")
+ */
+function toNumericId(value: number | bigint | string): number {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    throw new AppError(400, `Invalid numeric ID: ${String(value)}`);
+  }
+  return parsed;
+}
 
-  for (const [key, column] of Object.entries(columnMap)) {
-    if (key in data) {
-      fields.push(`${column} = $${i}`);
-      values.push((data as { [key: string]: unknown })[key]);
-      i++;
+/**
+ * Lists the recurring weekly availability schedule for a provider.
+ */
+export async function getProviderWeeklySchedule(
+  tenantId: number | bigint | string,
+  providerId: number | bigint | string
+): Promise<ProviderAvailabilityRecord[]> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+
+  const rows = await db
+    .select({
+      id: providerAvailability.id,
+      tenantId: providerAvailability.tenantId,
+      providerId: providerAvailability.providerId,
+      weekday: providerAvailability.weekday,
+      startTime: providerAvailability.startTime,
+      endTime: providerAvailability.endTime,
+      isActive: providerAvailability.isActive,
+    })
+    .from(providerAvailability)
+    .where(
+      and(
+        eq(providerAvailability.tenantId, pTenantId),
+        eq(providerAvailability.providerId, pProviderId)
+      )
+    )
+    .orderBy(asc(providerAvailability.weekday), asc(providerAvailability.startTime));
+
+  return rows;
+}
+
+/**
+ * Creates or appends a weekly recurring availability block.
+ */
+export async function addRecurringBlock(
+  tenantId: number | bigint | string,
+  userId: string,
+  providerId: number | bigint | string,
+  input: RecurringBlockInput
+): Promise<ProviderAvailabilityRecord> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+
+  if (!Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6) {
+    throw new AppError(400, "Weekday must be an integer between 0 (Sunday) and 6 (Saturday).");
+  }
+
+  if (input.startTime >= input.endTime) {
+    throw new AppError(400, "Start time must precede end time.");
+  }
+
+  return await withTenantContext(pTenantId, userId, async (tx): Promise<ProviderAvailabilityRecord> => {
+    // 1. Verify provider belongs to this tenant[cite: 1]
+    const [provider] = await tx
+      .select({ id: providers.id })
+      .from(providers)
+      .where(
+        and(
+          eq(providers.id, pProviderId),
+          eq(providers.tenantId, pTenantId)
+        )
+      )
+      .limit(1);
+
+    if (!provider) {
+      throw new AppError(404, "Provider not found.");
     }
-  }
 
-  if (fields.length === 0) {
-    const existing = await client.query("select * from provider_availability where id = $1", [id]);
-    return existing.rowCount ? mapBlock(existing.rows[0]) : null;
-  }
+    // 2. Insert availability block[cite: 1]
+    const [created] = await tx
+      .insert(providerAvailability)
+      .values({
+        tenantId: pTenantId,
+        providerId: pProviderId,
+        weekday: input.weekday,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        isActive: input.isActive ?? true,
+      })
+      .returning();
 
-  values.push(id);
-  const result = await client.query(
-    `update provider_availability set ${fields.join(", ")} where id = $${i} returning *`,
-    values
-  );
-  return result.rowCount ? mapBlock(result.rows[0]) : null;
-}
+    if (!created) {
+      throw new AppError(500, "Failed to create recurring availability block.");
+    }
 
-export async function deleteAvailabilityBlock(client: PoolClient, id: number): Promise<boolean> {
-  const result = await client.query("delete from provider_availability where id = $1", [id]);
-  return (result.rowCount ?? 0) > 0;
-}
-
-export async function listExceptions(client: PoolClient, providerId: number): Promise<AvailabilityException[]> {
-  const result = await client.query(
-    "select * from provider_availability_exceptions where provider_id = $1 order by exception_date",
-    [providerId]
-  );
-  return result.rows.map(mapException);
-}
-
-export async function createException(
-  client: PoolClient,
-  tenantId: number,
-  providerId: number,
-  data: { exceptionDate: string; isAvailable: boolean; startTime?: string; endTime?: string; reason?: string }
-): Promise<AvailabilityException> {
-  const result = await client.query(
-    `insert into provider_availability_exceptions (tenant_id, provider_id, exception_date, is_available, start_time, end_time, reason)
-     values ($1, $2, $3, $4, $5, $6, $7)
-     returning *`,
-    [tenantId, providerId, data.exceptionDate, data.isAvailable, data.startTime ?? null, data.endTime ?? null, data.reason ?? null]
-  );
-  return mapException(result.rows[0]);
-}
-
-export async function deleteException(client: PoolClient, id: number): Promise<boolean> {
-  const result = await client.query("delete from provider_availability_exceptions where id = $1", [id]);
-  return (result.rowCount ?? 0) > 0;
-}
-
-export async function getProviderBusyWindows(
-  client: PoolClient,
-  providerId: number,
-  date: string
-): Promise<{ startTime: string; endTime: string }[]> {
-  const result = await client.query(
-    "select * from get_provider_busy_windows($1, $2::date)",
-    [providerId, date]
-  );
-  return result.rows.map((r) => ({ startTime: r.start_time, endTime: r.end_time }));
-}
-
-export async function getAvailableSlots(
-  client: PoolClient,
-  providerId: number,
-  date: string,
-  durationMinutes: number
-) {
-  const [blocks, exceptions, busyWindows] = await Promise.all([
-    listAvailabilityBlocks(client, providerId),
-    listExceptions(client, providerId),
-    getProviderBusyWindows(client, providerId, date),
-  ]);
-
-  return generateSlots({
-    date,
-    weeklyHours: blocks.filter((b) => b.isActive),
-    exceptions: exceptions.map((e) => ({
-      exceptionDate: e.exceptionDate,
-      isAvailable: e.isAvailable,
-      startTime: e.startTime,
-      endTime: e.endTime,
-    })),
-    existingAppointments: busyWindows,
-    durationMinutes,
+    return created;
   });
 }
+
+/**
+ * Deletes a weekly recurring availability block.
+ */
+export async function deleteRecurringBlock(
+  tenantId: number | bigint | string,
+  userId: string,
+  providerId: number | bigint | string,
+  blockId: number | bigint | string
+): Promise<DeleteOperationResult> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+  const pBlockId = toNumericId(blockId);
+
+  return await withTenantContext(pTenantId, userId, async (tx): Promise<DeleteOperationResult> => {
+    const deleted = await tx
+      .delete(providerAvailability)
+      .where(
+        and(
+          eq(providerAvailability.id, pBlockId),
+          eq(providerAvailability.tenantId, pTenantId),
+          eq(providerAvailability.providerId, pProviderId)
+        )
+      )
+      .returning({ id: providerAvailability.id });
+
+    if (deleted.length === 0) {
+      throw new AppError(404, "Availability block not found.");
+    }
+
+    return { success: true };
+  });
+}
+
+/**
+ * Lists date-specific exceptions for a provider.
+ */
+export async function getProviderExceptions(
+  tenantId: number | bigint | string,
+  providerId: number | bigint | string
+): Promise<ProviderExceptionRecord[]> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+
+  const rows = await db
+    .select({
+      id: providerAvailabilityExceptions.id,
+      tenantId: providerAvailabilityExceptions.tenantId,
+      providerId: providerAvailabilityExceptions.providerId,
+      exceptionDate: providerAvailabilityExceptions.exceptionDate,
+      isAvailable: providerAvailabilityExceptions.isAvailable,
+      startTime: providerAvailabilityExceptions.startTime,
+      endTime: providerAvailabilityExceptions.endTime,
+      reason: providerAvailabilityExceptions.reason,
+    })
+    .from(providerAvailabilityExceptions)
+    .where(
+      and(
+        eq(providerAvailabilityExceptions.tenantId, pTenantId),
+        eq(providerAvailabilityExceptions.providerId, pProviderId)
+      )
+    )
+    .orderBy(asc(providerAvailabilityExceptions.exceptionDate));
+
+  return rows;
+}
+
+/**
+ * Creates or updates an availability exception for a specific calendar date.
+ */
+export async function addDateException(
+  tenantId: number | bigint | string,
+  userId: string,
+  providerId: number | bigint | string,
+  input: DateExceptionInput
+): Promise<ProviderExceptionRecord> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+
+  if (input.isAvailable && (!input.startTime || !input.endTime)) {
+    throw new AppError(400, "Start and end times are required when marking a date as available.");
+  }
+
+  if (input.startTime && input.endTime && input.startTime >= input.endTime) {
+    throw new AppError(400, "Start time must precede end time.");
+  }
+
+  return await withTenantContext(pTenantId, userId, async (tx): Promise<ProviderExceptionRecord> => {
+    // 1. Verify provider belongs to tenant[cite: 1]
+    const [provider] = await tx
+      .select({ id: providers.id })
+      .from(providers)
+      .where(
+        and(
+          eq(providers.id, pProviderId),
+          eq(providers.tenantId, pTenantId)
+        )
+      )
+      .limit(1);
+
+    if (!provider) {
+      throw new AppError(404, "Provider not found.");
+    }
+
+    // 2. Insert exception record[cite: 1]
+    const [created] = await tx
+      .insert(providerAvailabilityExceptions)
+      .values({
+        tenantId: pTenantId,
+        providerId: pProviderId,
+        exceptionDate: input.exceptionDate,
+        isAvailable: input.isAvailable,
+        startTime: input.startTime ?? null,
+        endTime: input.endTime ?? null,
+        reason: input.reason?.trim() || null,
+      })
+      .returning();
+
+    if (!created) {
+      throw new AppError(500, "Failed to record availability exception.");
+    }
+
+    return created;
+  });
+}
+
+/**
+ * Deletes a date-specific availability exception.
+ */
+export async function deleteDateException(
+  tenantId: number | bigint | string,
+  userId: string,
+  providerId: number | bigint | string,
+  exceptionId: number | bigint | string
+): Promise<DeleteOperationResult> {
+  const pTenantId = toNumericId(tenantId);
+  const pProviderId = toNumericId(providerId);
+  const pExceptionId = toNumericId(exceptionId);
+
+  return await withTenantContext(pTenantId, userId, async (tx): Promise<DeleteOperationResult> => {
+    const deleted = await tx
+      .delete(providerAvailabilityExceptions)
+      .where(
+        and(
+          eq(providerAvailabilityExceptions.id, pExceptionId),
+          eq(providerAvailabilityExceptions.tenantId, pTenantId),
+          eq(providerAvailabilityExceptions.providerId, pProviderId)
+        )
+      )
+      .returning({ id: providerAvailabilityExceptions.id });
+
+    if (deleted.length === 0) {
+      throw new AppError(404, "Availability exception not found.");
+    }
+
+    return { success: true };
+  });
+}
+
+/**
+ * Route handler compatibility alias
+ */
+export const removeProviderException = deleteDateException;
