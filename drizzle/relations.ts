@@ -41,10 +41,7 @@ export const tenantsRelations = relations(tenants, ({one, many}) => ({
 	tenantUsers: many(tenantUsers),
 	providerAvailabilities: many(providerAvailability),
 	providerAvailabilityExceptions: many(providerAvailabilityExceptions),
-	user: one(users, {
-		fields: [tenants.userId],
-		references: [users.id]
-	}),
+	users: many(users),
 	orderReviews: many(orderReviews),
 	categories: many(categories),
 	bookingCategories: many(bookingCategories),

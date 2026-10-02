@@ -2,8 +2,9 @@ import { z } from "zod";
 
 export const registerSchema = z.object({
   email: z.string().trim().email("Invalid email format"),
+  mobile: z.string().trim().min(10, "Mobile number must be at least 10 digit"),
   password: z.string().min(8, "Password must be at least 8 characters long"),
-  fullName: z.string().trim().min(2, "Full name must be at least 2 characters").optional(),
+  fullname: z.string().trim().min(2, "Full name must be at least 2 characters"),
 });
 
 export const loginSchema = z.object({

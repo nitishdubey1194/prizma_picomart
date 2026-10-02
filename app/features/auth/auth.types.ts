@@ -3,7 +3,8 @@ export type AppRole = "super_admin" | "admin" | "vendor" | "customer";
 export interface RegisterInput {
   email: string;
   password: string;
-  fullName?: string;
+  fullname: string;
+  mobile: string;
 }
 
 export interface LoginInput {

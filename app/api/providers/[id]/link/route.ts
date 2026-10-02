@@ -33,12 +33,12 @@ export async function POST(
 
     const body = (await request.json()) as LinkUserToProviderInput;
 
-    if (!body?.userId) {
-      return NextResponse.json(
-        { error: "Field 'userId' is required" },
-        { status: 400 }
-      );
-    }
+    // if (!body?.userId) {
+    //   return NextResponse.json(
+    //     { error: "Field 'userId' is required" },
+    //     { status: 400 }
+    //   );
+    // }
 
     const tenant = await getCurrentTenant();
     const provider = await linkUserToProvider(

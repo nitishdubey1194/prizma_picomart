@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
-import { users, profiles, refreshTokens, tenantUsers } from "@/drizzle/schema";
+import { users, profiles, refreshTokens, tenantUsers, userRoles } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql, or } from "drizzle-orm";
 import { RegisterInput, LoginInput, AuthResponse, AuthTokens } from "./auth.types";
 import {
   hashPassword,
@@ -18,16 +18,25 @@ export async function registerUser(
   input: RegisterInput
 ): Promise<AuthResponse> {
   const normalizedEmail = input.email.toLowerCase().trim();
-
+  const normalizedMobile = input.mobile.trim();
+  const fullname = input.fullname.trim();
   // 1. Check existing user
   const [existingUser] = await db
     .select({ id: users.id })
     .from(users)
-    .where(sql`LOWER(${users.email}::text) = ${normalizedEmail}`)
+    .where(
+      and(
+        eq(users.tenantId, tenantId),
+        or(
+          sql`LOWER(${users.email}) = ${normalizedEmail}`,
+          eq(users.mobile, normalizedMobile)
+        )
+      )
+    )
     .limit(1);
 
   if (existingUser) {
-    throw new AppError(409, "User with this email already exists.");
+    throw new AppError(409, "User with this email or mobile already exists.");
   }
 
   const passwordHash = await hashPassword(input.password);
@@ -37,17 +46,25 @@ export async function registerUser(
     const [newUser] = await tx
       .insert(users)
       .values({
-        email: sql`${normalizedEmail}::citext`,
+        email: sql`${normalizedEmail}`,
+        mobile: sql`${normalizedMobile}`,
+        fullname: sql`${fullname}`,
         passwordHash,
+        tenantId
       })
       .returning({ id: users.id });
 
     // 3. Insert profile[cite: 1]
     await tx.insert(profiles).values({
       id: newUser.id,
-      fullName: input.fullName ?? null,
+      fullName: input.fullname ?? null,
       email: normalizedEmail,
       tenantId,
+      role: "customer",
+    });
+
+    await tx.insert(userRoles).values({
+      userId: newUser.id,
       role: "customer",
     });
 
@@ -65,6 +82,7 @@ export async function registerUser(
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
     await tx.insert(refreshTokens).values({
+      tenantId: tenantId,
       userId: newUser.id,
       tokenHash: tokenDigest,
       expiresAt,
@@ -98,63 +116,73 @@ export async function loginUser(
 ): Promise<AuthResponse> {
   const normalizedEmail = input.email.toLowerCase().trim();
 
-  // 1. Fetch user credentials and tenant role[cite: 1]
-  const [userRecord] = await db
+  // 1. Fetch user joined with the specific tenant membership
+  const [record] = await db
     .select({
       id: users.id,
-      email: sql<string>`${users.email}::text`,
+      email: users.email,
       passwordHash: users.passwordHash,
       role: tenantUsers.role,
       isTenantUserActive: tenantUsers.isActive,
     })
     .from(users)
-    .leftJoin(
+    .innerJoin(
       tenantUsers,
       and(
         eq(tenantUsers.userId, users.id),
         eq(tenantUsers.tenantId, tenantId)
       )
     )
-    .where(sql`LOWER(${users.email}::text) = ${normalizedEmail}`)
+    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
     .limit(1);
-
-  if (!userRecord) {
+  // Return generic 401 if user not found in this tenant
+  if (!record) {
     throw new AppError(401, "Invalid email or password.");
   }
 
-  const isPasswordValid = await verifyPassword(input.password, userRecord.passwordHash);
+  // 2. Validate password first to prevent user enumeration
+  const isPasswordValid = await verifyPassword(
+    input.password,
+    record.passwordHash
+  );
+  console.log(isPasswordValid)
   if (!isPasswordValid) {
     throw new AppError(401, "Invalid email or password.");
   }
 
-  if (userRecord.isTenantUserActive === false) {
+  // 3. Verify tenant-level active status
+  if (!record.isTenantUserActive) {
     throw new AppError(403, "Your account has been deactivated for this tenant.");
   }
 
-  const assignedRole = userRecord.role ?? "customer";
+  const assignedRole = record.role ?? "customer";
 
-  // 2. Persist new refresh token[cite: 1]
+  // 4. Generate and persist refresh token
   const rawRefreshToken = generateRefreshToken();
   const tokenDigest = hashToken(rawRefreshToken);
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+  );
 
   await db.insert(refreshTokens).values({
-    userId: userRecord.id,
+    userId: record.id,
+    tenantId, // Ensure refresh token is bound to this tenant
     tokenHash: tokenDigest,
-    expiresAt,
+    expiresAt: expiresAt.toISOString(),
   });
 
+  // 5. Issue access token
   const accessToken = generateAccessToken({
-    userId: userRecord.id,
-    email: userRecord.email,
+    userId: record.id,
+    email: record.email,
     role: assignedRole,
     tenantId,
   });
 
   return {
     user: {
-      id: userRecord.id,
-      email: userRecord.email,
+      id: record.id,
+      email: record.email,
       role: assignedRole,
       tenantId,
     },
@@ -218,6 +246,7 @@ export async function refreshUserTokens(
       .where(eq(refreshTokens.id, storedToken.id));
 
     await tx.insert(refreshTokens).values({
+      tenantId: tenantId,
       userId: storedToken.userId,
       tokenHash: nextTokenDigest,
       expiresAt: nextExpiresAt,

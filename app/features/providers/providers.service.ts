@@ -4,6 +4,8 @@ import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql, asc } from "drizzle-orm";
 
+
+
 export interface ProviderListItem {
   id: number;
   name: string;
@@ -47,8 +49,10 @@ export async function getProvidersByService(
       .select({
         id: providers.id,
         name: providers.name,
+        title: providers.title,
         avatarUrl: providers.avatarUrl,
         isActive: providers.isActive,
+        userId: providers.userId,
       })
       .from(providers)
       .where(
@@ -57,30 +61,45 @@ export async function getProvidersByService(
           eq(providers.isActive, true)
         )
       );
+
     return rows.map((r) => ({
       ...r,
       id: Number(r.id),
-      isActive: r.isActive ?? false, // 👈 Guarantees strict boolean
+      isActive: r.isActive ?? false,
     }));
   }
 
   const pServiceId = Number(serviceId);
+
+  // Join providerServices and services to pull base price and custom override
   const rows = await db
     .select({
       id: providers.id,
       name: providers.name,
+      title: providers.title,
       avatarUrl: providers.avatarUrl,
       isActive: providers.isActive,
+      basePrice: services.price,
+      priceOverride: providerServices.priceOverride,
+      baseDurationMinutes: services.durationMinutes,
+      durationOverrideMinutes: providerServices.durationOverrideMinutes,
+      effectivePrice: sql<string>`COALESCE(${providerServices.priceOverride}, ${services.price})`.as("effective_price"),
+      effectiveDuration: sql<number>`COALESCE(${providerServices.durationOverrideMinutes}, ${services.durationMinutes})`.as("effective_duration"),
     })
     .from(providers)
     .innerJoin(
       providerServices,
       eq(providerServices.providerId, providers.id)
     )
+    .innerJoin(
+      services,
+      eq(services.id, providerServices.serviceId)
+    )
     .where(
       and(
         eq(providers.tenantId, pTenantId),
         eq(providerServices.serviceId, pServiceId),
+        eq(providerServices.isActive, true),
         eq(providers.isActive, true)
       )
     );
@@ -88,7 +107,7 @@ export async function getProvidersByService(
   return rows.map((r) => ({
     ...r,
     id: Number(r.id),
-    isActive: r.isActive ?? false, // 👈 Guarantees strict boolean
+    isActive: r.isActive ?? false,
   }));
 }
 
@@ -112,12 +131,14 @@ export async function getTenantProviders(tenantId: number | bigint) {
       isActive: providers.isActive,
       createdAt: providers.createdAt,
       updatedAt: providers.updatedAt,
+      userLinkEmail: users.email,
     })
     .from(providers)
+    .leftJoin(users, eq(providers.userId, users.id))
     .where(
       and(
         eq(providers.tenantId, pTenantId),
-        eq(providers.isActive, true)
+        // eq(providers.isActive, true)
       )
     )
     .orderBy(asc(providers.name));
@@ -316,15 +337,15 @@ export async function linkUserToProvider(
 
   return await withTenantContext(pTenantId, adminUserId, async (tx) => {
     // 1. Verify user exists[cite: 1]
-    const [user] = await tx
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, input.userId))
-      .limit(1);
+    // const [user] = await tx
+    //   .select({ id: users.id })
+    //   .from(users)
+    //   .where(eq(users.id, input.userId))
+    //   .limit(1);
 
-    if (!user) {
-      throw new AppError(404, "User account not found.");
-    }
+    // if (!user) {
+    //   throw new AppError(404, "User account not found.");
+    // }
 
     // 2. Link provider[cite: 1]
     const [updated] = await tx
@@ -382,3 +403,93 @@ export async function deleteProvider(
     return { success: true };
   });
 }
+
+export async function getProvidersByCategory(
+  tenantId: number | bigint,
+  category: string
+) {
+  const pTenantId = Number(tenantId);
+
+  return await db
+    .select({
+      id: providers.id,
+      name: providers.name,
+      slug: providers.slug,
+      category: providers.category,
+      title: providers.title,
+      bio: providers.bio,
+      avatarUrl: providers.avatarUrl,
+    })
+    .from(providers)
+    .where(
+      and(
+        eq(providers.tenantId, pTenantId),
+        eq(providers.category, category),
+        eq(providers.isActive, true)
+      )
+    )
+    .orderBy(asc(providers.name));
+}
+
+/**
+ * Fetches a single provider by tenantId and slug, resolving services with overrides.
+ */
+export async function getProviderBySlug(
+  tenantId: number | bigint,
+  slug: string
+) {
+  const pTenantId = Number(tenantId);
+
+  const [provider] = await db
+    .select({
+      id: providers.id,
+      name: providers.name,
+      slug: providers.slug,
+      category: providers.category,
+      title: providers.title,
+      bio: providers.bio,
+      avatarUrl: providers.avatarUrl,
+    })
+    .from(providers)
+    .where(
+      and(
+        eq(providers.tenantId, pTenantId),
+        eq(providers.slug, slug),
+        eq(providers.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!provider) return null;
+
+  // Resolve only services explicitly linked and active for this provider
+  const linkedServices = await db
+    .select({
+      id: services.id,
+      name: services.name,
+      slug: services.slug,
+      description: services.description,
+      basePrice: services.price,
+      priceOverride: providerServices.priceOverride,
+      baseDurationMinutes: services.durationMinutes,
+      durationOverrideMinutes: providerServices.durationOverrideMinutes,
+      effectivePrice: sql<string>`COALESCE(${providerServices.priceOverride}, ${services.price})`.as("effective_price"),
+      effectiveDuration: sql<number>`COALESCE(${providerServices.durationOverrideMinutes}, ${services.durationMinutes})`.as("effective_duration"),
+    })
+    .from(providerServices)
+    .innerJoin(services, eq(services.id, providerServices.serviceId))
+    .where(
+      and(
+        eq(providerServices.tenantId, pTenantId),
+        eq(providerServices.providerId, provider.id),
+        eq(providerServices.isActive, true),
+        eq(services.isActive, true)
+      )
+    );
+
+  return {
+    ...provider,
+    services: linkedServices,
+  };
+}
+

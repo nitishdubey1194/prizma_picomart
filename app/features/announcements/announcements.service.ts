@@ -92,7 +92,7 @@ export async function createAnnouncement(
         .from(stores)
         .where(
           and(
-            eq(stores.id, BigInt(input.storeId)),
+            eq(stores.id, Number(input.storeId)),
             eq(stores.tenantId, pTenantId)
           )
         )
@@ -130,7 +130,7 @@ export async function updateAnnouncement(
   input: UpdateAnnouncementInput
 ): Promise<AnnouncementRecord> {
   const pTenantId = Number(tenantId);
-  const pAnnouncementIdBigInt = BigInt(announcementId);
+  const pAnnouncementIdBigInt = Number(announcementId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const updatePayload: Record<string, unknown> = {
@@ -149,7 +149,7 @@ export async function updateAnnouncement(
       .set(updatePayload)
       .where(
         and(
-          eq(announcements.id, pAnnouncementIdBigInt),
+          eq(announcements.id, Number(pAnnouncementIdBigInt)),
           eq(announcements.tenantId, pTenantId)
         )
       )
@@ -175,14 +175,14 @@ export async function deleteAnnouncement(
   announcementId: number | bigint | string
 ): Promise<{ success: boolean }> {
   const pTenantId = Number(tenantId);
-  const pAnnouncementIdBigInt = BigInt(announcementId);
+  const pAnnouncementIdBigInt = Number(announcementId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const deleted = await tx
       .delete(announcements)
       .where(
         and(
-          eq(announcements.id, pAnnouncementIdBigInt),
+          eq(announcements.id, Number(pAnnouncementIdBigInt)),
           eq(announcements.tenantId, pTenantId)
         )
       )

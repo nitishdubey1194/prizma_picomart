@@ -102,7 +102,7 @@ export async function getProductById(
   productId: number | bigint | string
 ) {
   const pTenantId = Number(tenantId);
-  const pProductIdBigInt = BigInt(productId);
+  const pProductIdBigInt = Number(productId);
   const pProductIdNum = Number(productId);
 
   const [product] = await db
@@ -212,7 +212,7 @@ export async function createProduct(
         .from(categories)
         .where(
           and(
-            eq(categories.id, BigInt(input.categoryId)),
+            eq(categories.id, Number(input.categoryId)),
             eq(categories.tenantId, pTenantId)
           )
         )
@@ -256,7 +256,7 @@ export async function updateProduct(
   input: UpdateProductInput
 ) {
   const pTenantId = Number(tenantId);
-  const pProductIdBigInt = BigInt(productId);
+  const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // Check if new slug collides with another product[cite: 1]
@@ -326,7 +326,7 @@ export async function deleteProduct(
   productId: number | bigint | string
 ) {
   const pTenantId = Number(tenantId);
-  const pProductIdBigInt = BigInt(productId);
+  const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     const [deleted] = await tx
