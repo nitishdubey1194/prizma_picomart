@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { services } from "@/drizzle/schema";
+import { services, providerServices } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql, asc } from "drizzle-orm";
@@ -12,6 +12,7 @@ export interface CreateServiceInput {
   price: string | number;
   bufferMinutes?: number;
   isActive?: boolean;
+  providerId?: number | bigint;
 }
 
 export interface UpdateServiceInput {
@@ -94,7 +95,7 @@ export async function createService(
   }
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify slug uniqueness and retrieve existing fallback values
+    // 1. Check existing service slug for this tenant
     const [existingSlug] = await tx
       .select({
         id: services.id,
@@ -110,6 +111,9 @@ export async function createService(
       )
       .limit(1);
 
+    let activeServiceId: number;
+    let savedService;
+
     if (existingSlug) {
       const [reactivated] = await tx
         .update(services)
@@ -119,31 +123,67 @@ export async function createService(
           price: String(input.price),
           bufferMinutes: input.bufferMinutes ?? existingSlug.bufferMinutes ?? 0,
           description: input.description !== undefined ? input.description : existingSlug.description,
-          isActive: true, // Re-enables the service if it was previously soft-deleted/disabled
+          isActive: true,
           updatedAt: sql`now()`,
         })
         .where(eq(services.id, existingSlug.id))
         .returning();
 
-      return reactivated;
+      activeServiceId = existingSlug.id;
+      savedService = reactivated;
+    } else {
+      const [newService] = await tx
+        .insert(services)
+        .values({
+          tenantId: pTenantId,
+          name: input.name,
+          slug: input.slug,
+          description: input.description ?? null,
+          durationMinutes: input.durationMinutes,
+          price: String(input.price),
+          bufferMinutes: input.bufferMinutes ?? 0,
+          isActive: input.isActive ?? true,
+        })
+        .returning();
+
+      activeServiceId = newService.id;
+      savedService = newService;
     }
 
-    // 2. Insert new service
-    const [newService] = await tx
-      .insert(services)
-      .values({
-        tenantId: pTenantId,
-        name: input.name,
-        slug: input.slug,
-        description: input.description ?? null,
-        durationMinutes: input.durationMinutes,
-        price: String(input.price),
-        bufferMinutes: input.bufferMinutes ?? 0,
-        isActive: input.isActive ?? true,
-      })
-      .returning();
+    // 2. Auto-assign to provider if providerId was provided
+    if (input.providerId) {
+      const targetProviderId = Number(input.providerId);
 
-    return newService;
+      const [existingMapping] = await tx
+        .select({ id: providerServices.id })
+        .from(providerServices)
+        .where(
+          and(
+            eq(providerServices.tenantId, pTenantId),
+            eq(providerServices.providerId, targetProviderId),
+            eq(providerServices.serviceId, activeServiceId)
+          )
+        )
+        .limit(1);
+
+      if (existingMapping) {
+        await tx
+          .update(providerServices)
+          .set({
+            isActive: true
+          })
+          .where(eq(providerServices.id, existingMapping.id));
+      } else {
+        await tx.insert(providerServices).values({
+          tenantId: pTenantId,
+          providerId: targetProviderId,
+          serviceId: activeServiceId,
+          isActive: true,
+        });
+      }
+    }
+
+    return savedService;
   });
 }
 

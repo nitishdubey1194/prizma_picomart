@@ -11,7 +11,7 @@ import {
 } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
-import { and, eq, desc, sql, gte, lte, ne } from "drizzle-orm";
+import { and, eq, desc, sql, gte, lte, asc } from "drizzle-orm";
 
 export type BookingStatusType = "pending" | "confirmed" | "cancelled" | "completed";
 
@@ -160,6 +160,7 @@ export async function getAppointments(
         serviceName: services.name,
         customerName: profiles.fullName,
         customerEmail: sql<string>`${users.email}::text`,
+        customerMobile: users.mobile
       })
       .from(appointments)
       .innerJoin(providers, eq(providers.id, appointments.providerId))
@@ -167,7 +168,7 @@ export async function getAppointments(
       .innerJoin(users, eq(users.id, appointments.userId))
       .leftJoin(profiles, eq(profiles.id, appointments.userId))
       .where(and(...conditions))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(asc(appointments.startTime));
 
     return rows.map((row) => ({
       ...row,

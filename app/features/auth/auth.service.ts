@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { users, profiles, refreshTokens, tenantUsers } from "@/drizzle/schema";
+import { users, profiles, refreshTokens, tenantUsers, userRoles } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
 import { and, eq, isNull, sql, or } from "drizzle-orm";
 import { RegisterInput, LoginInput, AuthResponse, AuthTokens } from "./auth.types";
@@ -60,6 +60,11 @@ export async function registerUser(
       fullName: input.fullname ?? null,
       email: normalizedEmail,
       tenantId,
+      role: "customer",
+    });
+
+    await tx.insert(userRoles).values({
+      userId: newUser.id,
       role: "customer",
     });
 
