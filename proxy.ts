@@ -4,6 +4,9 @@ import type { NextRequest } from 'next/server';
 const ALLOWED_ORIGINS = [
   'http://localhost:3001',
   'http://booking.localhost:3001',
+  'https://booking.picomart.in',
+  'https://store.picomart.in',
+  'https://*.picomart.in'
   // add your real subdomains here once you know them, e.g.:
   // 'https://booking.picomart.in',
   // 'https://johnbarber.picomart.in',
