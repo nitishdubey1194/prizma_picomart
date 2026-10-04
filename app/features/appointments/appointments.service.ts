@@ -7,15 +7,17 @@ import {
   providerServices,
   users,
   profiles,
-  userRoles
+  userRoles,
 } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, desc, sql, gte, lte, asc } from "drizzle-orm";
 
-export type BookingStatusType = "pending" | "confirmed" | "cancelled" | "completed";
-
-
+export type BookingStatusType =
+  | "pending"
+  | "confirmed"
+  | "cancelled"
+  | "completed";
 
 export interface AppointmentWithDetails {
   id: string;
@@ -40,7 +42,7 @@ export interface CreateAppointmentInput {
   providerId: number | bigint | string;
   serviceId: number | bigint | string;
   startTime: string; // ISO 8601 string
-  endTime: string;   // ISO 8601 string
+  endTime: string; // ISO 8601 string
   localDate: string; // YYYY-MM-DD
   customerNotes?: string | null;
 }
@@ -88,94 +90,104 @@ export interface AppointmentFilterOptions {
 export async function getAppointments(
   tenantId: number | bigint,
   userId: string,
-  options: AppointmentFilterOptions = {}
+  options: AppointmentFilterOptions = {},
 ): Promise<AppointmentWithDetails[]> {
   const pTenantId = Number(tenantId);
 
-  return await withTenantContext(pTenantId, userId, async (tx): Promise<AppointmentWithDetails[]> => {
-    // 1. Fetch user roles from user_roles
-    const roleRows = await tx
-      .select({ role: sql<string>`${userRoles.role}::text` })
-      .from(userRoles)
-      .where(sql`${userRoles.userId} = ${userId}::uuid`);
+  return await withTenantContext(
+    pTenantId,
+    userId,
+    async (tx): Promise<AppointmentWithDetails[]> => {
+      // 1. Fetch user roles from user_roles
+      const roleRows = await tx
+        .select({ role: sql<string>`${userRoles.role}::text` })
+        .from(userRoles)
+        .where(sql`${userRoles.userId} = ${userId}::uuid`);
 
-    const isVendor = roleRows.some((r) => r.role === "vendor");
+      const isVendor = roleRows.some((r) => r.role === "vendor");
 
-    // 2. Fetch linked provider record for this tenant
-    const [providerProfile] = await tx
-      .select({ id: providers.id })
-      .from(providers)
-      .where(
-        and(
-          sql`${providers.userId} = ${userId}::uuid`,
-          eq(providers.tenantId, pTenantId)
+      // 2. Fetch linked provider record for this tenant
+      const [providerProfile] = await tx
+        .select({ id: providers.id })
+        .from(providers)
+        .where(
+          and(
+            sql`${providers.userId} = ${userId}::uuid`,
+            eq(providers.tenantId, pTenantId),
+          ),
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    // 3. Build conditions scoped to tenant
-    const conditions = [eq(appointments.tenantId, pTenantId)];
+      // 3. Build conditions scoped to tenant
+      const conditions = [eq(appointments.tenantId, pTenantId)];
 
-    if (isVendor) {
-      // Vendor: Sees all appointments. Only filter provider if requested in options
-      if (options.providerId) {
-        conditions.push(eq(appointments.providerId, Number(options.providerId)));
+      if (isVendor) {
+        // Vendor: Sees all appointments. Only filter provider if requested in options
+        if (options.providerId) {
+          conditions.push(
+            eq(appointments.providerId, Number(options.providerId)),
+          );
+        }
+      } else if (providerProfile) {
+        // Provider: Constrained to their assigned provider ID
+        conditions.push(
+          eq(appointments.providerId, Number(providerProfile.id)),
+        );
+      } else {
+        // Customer: Constrained to appointments they created
+        conditions.push(sql`${appointments.userId} = ${userId}::uuid`);
       }
-    } else if (providerProfile) {
-      // Provider: Constrained to their assigned provider ID
-      conditions.push(eq(appointments.providerId, Number(providerProfile.id)));
-    } else {
-      // Customer: Constrained to appointments they created
-      conditions.push(sql`${appointments.userId} = ${userId}::uuid`);
-    }
 
-    if (options.status) {
-      conditions.push(sql`${appointments.status} = ${options.status}::booking_status`);
-    }
+      if (options.status) {
+        conditions.push(
+          sql`${appointments.status} = ${options.status}::booking_status`,
+        );
+      }
 
-    if (options.startDate) {
-      conditions.push(gte(appointments.localDate, options.startDate));
-    }
+      if (options.startDate) {
+        conditions.push(gte(appointments.localDate, options.startDate));
+      }
 
-    if (options.endDate) {
-      conditions.push(lte(appointments.localDate, options.endDate));
-    }
+      if (options.endDate) {
+        conditions.push(lte(appointments.localDate, options.endDate));
+      }
 
-    const rows = await tx
-      .select({
-        id: appointments.id,
-        tenantId: appointments.tenantId,
-        providerId: appointments.providerId,
-        serviceId: appointments.serviceId,
-        userId: appointments.userId,
-        startTime: appointments.startTime,
-        endTime: appointments.endTime,
-        localDate: appointments.localDate,
-        status: appointments.status,
-        price: appointments.price,
-        customerNotes: appointments.customerNotes,
-        internalNotes: appointments.internalNotes,
-        createdAt: appointments.createdAt,
-        providerName: providers.name,
-        serviceName: services.name,
-        customerName: profiles.fullName,
-        customerEmail: sql<string>`${users.email}::text`,
-        customerMobile: users.mobile
-      })
-      .from(appointments)
-      .innerJoin(providers, eq(providers.id, appointments.providerId))
-      .innerJoin(services, eq(services.id, appointments.serviceId))
-      .innerJoin(users, eq(users.id, appointments.userId))
-      .leftJoin(profiles, eq(profiles.id, appointments.userId))
-      .where(and(...conditions))
-      .orderBy(asc(appointments.startTime));
+      const rows = await tx
+        .select({
+          id: appointments.id,
+          tenantId: appointments.tenantId,
+          providerId: appointments.providerId,
+          serviceId: appointments.serviceId,
+          userId: appointments.userId,
+          startTime: appointments.startTime,
+          endTime: appointments.endTime,
+          localDate: appointments.localDate,
+          status: appointments.status,
+          price: appointments.price,
+          customerNotes: appointments.customerNotes,
+          internalNotes: appointments.internalNotes,
+          createdAt: appointments.createdAt,
+          providerName: providers.name,
+          serviceName: services.name,
+          customerName: profiles.fullName,
+          customerEmail: sql<string>`${users.email}::text`,
+          customerMobile: users.mobile,
+        })
+        .from(appointments)
+        .innerJoin(providers, eq(providers.id, appointments.providerId))
+        .innerJoin(services, eq(services.id, appointments.serviceId))
+        .innerJoin(users, eq(users.id, appointments.userId))
+        .leftJoin(profiles, eq(profiles.id, appointments.userId))
+        .where(and(...conditions))
+        .orderBy(asc(appointments.startTime));
 
-    return rows.map((row) => ({
-      ...row,
-      id: row.id.toString(),
-      price: String(row.price),
-    }));
-  });
+      return rows.map((row) => ({
+        ...row,
+        id: row.id.toString(),
+        price: String(row.price),
+      }));
+    },
+  );
 }
 
 /**
@@ -184,7 +196,7 @@ export async function getAppointments(
 export async function getAppointmentById(
   tenantId: number | bigint,
   userId: string,
-  appointmentId: number | bigint | string
+  appointmentId: number | bigint | string,
 ) {
   const pTenantId = Number(tenantId);
   const pAppointmentId = Number(appointmentId);
@@ -216,8 +228,8 @@ export async function getAppointmentById(
       and(
         eq(appointments.id, pAppointmentId),
         eq(appointments.tenantId, pTenantId),
-        eq(appointments.userId, userId)
-      )
+        eq(appointments.userId, userId),
+      ),
     )
     .limit(1);
 
@@ -236,8 +248,8 @@ export async function getAppointmentById(
     .where(
       and(
         eq(appointmentStatusLogs.appointmentId, pAppointmentId),
-        eq(appointmentStatusLogs.tenantId, pTenantId)
-      )
+        eq(appointmentStatusLogs.tenantId, pTenantId),
+      ),
     )
     .orderBy(desc(appointmentStatusLogs.createdAt));
 
@@ -253,7 +265,7 @@ export async function getAppointmentById(
 export async function createAppointment(
   tenantId: number | bigint,
   userId: string,
-  input: CreateAppointmentInput
+  input: CreateAppointmentInput,
 ) {
   const pTenantId = Number(tenantId);
   const pProviderId = Number(input.providerId);
@@ -268,8 +280,8 @@ export async function createAppointment(
         and(
           eq(providers.id, pProviderId),
           eq(providers.tenantId, pTenantId),
-          eq(providers.isActive, true)
-        )
+          eq(providers.isActive, true),
+        ),
       )
       .limit(1);
 
@@ -291,20 +303,64 @@ export async function createAppointment(
         and(
           eq(providerServices.serviceId, services.id),
           eq(providerServices.providerId, pProviderId),
-          eq(providerServices.tenantId, pTenantId)
-        )
+          eq(providerServices.tenantId, pTenantId),
+        ),
       )
       .where(
         and(
           eq(services.id, pServiceId),
           eq(services.tenantId, pTenantId),
-          eq(services.isActive, true)
-        )
+          eq(services.isActive, true),
+        ),
       )
       .limit(1);
 
     if (!serviceMapping) {
       throw new AppError(404, "Service not found or unavailable.");
+    }
+    const [existingUserBooking] = await tx
+      .select({
+        id: appointments.id,
+        startTime: appointments.startTime,
+        localDate: appointments.localDate,
+        serviceName: services.name,
+      })
+      .from(appointments)
+      .innerJoin(
+        services,
+        and(
+          eq(services.id, appointments.serviceId),
+          eq(services.tenantId, appointments.tenantId),
+        ),
+      )
+      .where(
+        and(
+          eq(appointments.tenantId, pTenantId),
+          eq(appointments.providerId, pProviderId),
+          eq(appointments.userId, userId),
+          eq(appointments.localDate, input.localDate),
+          sql`${appointments.status} <> 'cancelled'::booking_status`,
+        ),
+      )
+      .limit(1);
+
+    if (existingUserBooking) {
+      // Format the time (e.g., "10:30 AM")
+      const formattedTime = new Date(
+        existingUserBooking.startTime,
+      ).toLocaleTimeString("en-IN", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const formattedDate = new Date(existingUserBooking.localDate)
+        .toLocaleDateString("en-IN")
+        .replace(/\//g, "-");
+
+      throw new AppError(
+        409,
+        `You already have an active appointment scheduled for "${existingUserBooking.serviceName}" on ${formattedDate} at ${formattedTime}.`,
+      );
     }
     const effectivePrice =
       serviceMapping.overridePrice != null
@@ -313,9 +369,8 @@ export async function createAppointment(
 
     // 3. Check for overlapping active appointments for this provider[cite: 1]
     const check = await tx.execute(
-  sql`SELECT current_setting('app.current_user_id', true) AS current_user, auth.uid() AS auth_uid`
-);
-console.log("DB AUTH CHECK:", check);
+      sql`SELECT current_setting('app.current_user_id', true) AS current_user, auth.uid() AS auth_uid`,
+    );
     const [overlapping] = await tx
       .select({ id: appointments.id })
       .from(appointments)
@@ -324,8 +379,8 @@ console.log("DB AUTH CHECK:", check);
           eq(appointments.tenantId, pTenantId),
           eq(appointments.providerId, pProviderId),
           sql`${appointments.status} <> 'cancelled'::booking_status`,
-          sql`${appointments.startTime} < ${input.endTime}::timestamptz AND ${appointments.endTime} > ${input.startTime}::timestamptz`
-        )
+          sql`${appointments.startTime} < ${input.endTime}::timestamptz AND ${appointments.endTime} > ${input.startTime}::timestamptz`,
+        ),
       )
       .limit(1);
 
@@ -367,7 +422,7 @@ export async function updateAppointmentStatus(
   tenantId: number | bigint,
   userId: string,
   appointmentId: number | bigint | string,
-  input: UpdateAppointmentStatusInput
+  input: UpdateAppointmentStatusInput,
 ) {
   const pTenantId = Number(tenantId);
   const pAppointmentId = Number(appointmentId);
@@ -379,8 +434,8 @@ export async function updateAppointmentStatus(
       .where(
         and(
           eq(appointments.id, pAppointmentId),
-          eq(appointments.tenantId, pTenantId)
-        )
+          eq(appointments.tenantId, pTenantId),
+        ),
       )
       .limit(1);
 
@@ -408,8 +463,8 @@ export async function updateAppointmentStatus(
       .where(
         and(
           eq(appointments.id, pAppointmentId),
-          eq(appointments.tenantId, pTenantId)
-        )
+          eq(appointments.tenantId, pTenantId),
+        ),
       )
       .returning();
 
@@ -433,11 +488,10 @@ export async function cancelAppointment(
   tenantId: number | bigint,
   userId: string,
   appointmentId: number | bigint | string,
-  reason?: string | null
+  reason?: string | null,
 ) {
   return await updateAppointmentStatus(tenantId, userId, appointmentId, {
     status: "cancelled",
     remarks: reason ?? "Cancelled by user.",
   });
 }
-
