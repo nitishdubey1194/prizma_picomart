@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, uniqueIndex, index, foreignKey, pgPolicy, bigserial, bigint, varchar, numeric, integer, boolean, check, smallint, time, date, serial, jsonb, pgView, pgSequence, pgEnum } from "drizzle-orm/pg-core"
+import { pgTable, uuid, text, timestamp, uniqueIndex, index, foreignKey, pgPolicy, bigserial, bigint, varchar, numeric, integer, boolean, check, smallint, time, date, serial, jsonb, pgView, pgSequence, pgEnum, doublePrecision } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
 export const announcementStatus = pgEnum("announcement_status", ['draft', 'published'])
@@ -658,6 +658,8 @@ export const providers = pgTable("providers", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	slug: varchar({ length: 150 }).notNull(),
 	category: varchar({ length: 100 }).notNull(),
+	latitude: numeric("latitude", { precision: 9, scale: 6 }),
+	longitude: numeric("longitude", { precision: 9, scale: 6 }),
 }, (table) => [
 	index("idx_providers_tenant_id").using("btree", table.tenantId.asc().nullsLast()),
 	uniqueIndex("providers_tenant_slug_key").using("btree", table.tenantId.asc().nullsLast(), table.slug.asc().nullsLast()),

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db/index";
-import { providers, providerServices, services, users } from "@/drizzle/schema";
+import { providers, providerServices, services, users,providerAvailability, providerAvailabilityExceptions } from "@/drizzle/schema";
 import {
   assertTenantRecordExists,
   assertUniqueTenantSlug,
@@ -26,6 +26,8 @@ export interface CreateProviderInput {
   avatarUrl?: string | null;
   userId?: string | null;
   isActive?: boolean;
+  latitude?: string | null;
+  longitude?: string | null;
 }
 
 export interface UpdateProviderInput {
@@ -136,9 +138,59 @@ export async function getTenantProviders(tenantId: number | bigint) {
       createdAt: providers.createdAt,
       updatedAt: providers.updatedAt,
       userLinkEmail: users.email,
+      latitude: providers.latitude,
+      longitude: providers.longitude,
+      todayRecurringStartTime: providerAvailability.startTime,
+      todayRecurringEndTime: providerAvailability.endTime,
+      isRecurringActive: providerAvailability.isActive,
+      isExceptionAvailable: providerAvailabilityExceptions.isAvailable,
+      exceptionStartTime: providerAvailabilityExceptions.startTime,
+      exceptionEndTime: providerAvailabilityExceptions.endTime,
+      exceptionReason: providerAvailabilityExceptions.reason,
+      isAvailableToday: sql<boolean>`
+        CASE
+          WHEN ${providerAvailabilityExceptions.id} IS NOT NULL THEN
+            COALESCE(${providerAvailabilityExceptions.isAvailable}, false)
+          WHEN ${providerAvailability.id} IS NOT NULL THEN
+            COALESCE(${providerAvailability.isActive}, true)
+          ELSE false
+        END
+      `.as("is_available_today"),
+      todayStartTime: sql<string | null>`
+        CASE
+          WHEN ${providerAvailabilityExceptions.id} IS NOT NULL AND ${providerAvailabilityExceptions.isAvailable} = true THEN
+            COALESCE(${providerAvailabilityExceptions.startTime}, ${providerAvailability.startTime})
+          WHEN ${providerAvailabilityExceptions.id} IS NOT NULL AND ${providerAvailabilityExceptions.isAvailable} = false THEN
+            NULL
+          ELSE ${providerAvailability.startTime}
+        END
+      `.as("today_start_time"),
+
+      todayEndTime: sql<string | null>`
+        CASE
+          WHEN ${providerAvailabilityExceptions.id} IS NOT NULL AND ${providerAvailabilityExceptions.isAvailable} = true THEN
+            COALESCE(${providerAvailabilityExceptions.endTime}, ${providerAvailability.endTime})
+          WHEN ${providerAvailabilityExceptions.id} IS NOT NULL AND ${providerAvailabilityExceptions.isAvailable} = false THEN
+            NULL
+          ELSE ${providerAvailability.endTime}
+        END
+      `.as("today_end_time"),
     })
     .from(providers)
     .leftJoin(users, eq(providers.userId, users.id))
+    .leftJoin(
+      providerAvailability,
+      and(
+        eq(providerAvailability.providerId, providers.id),
+        // Match dayOfWeek (0 = Sunday ... 6 = Saturday)
+      )
+    )
+    .leftJoin(
+      providerAvailabilityExceptions,
+      and(
+        eq(providerAvailabilityExceptions.providerId, providers.id)
+      )
+    )
     .where(
       and(
         eq(providers.tenantId, pTenantId),
@@ -147,7 +199,19 @@ export async function getTenantProviders(tenantId: number | bigint) {
     )
     .orderBy(asc(providers.name));
 
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    todaySchedule: {
+      isAvailable: Boolean(row.isAvailableToday),
+      startTime: row.todayStartTime,
+      endTime: row.todayEndTime,
+      formatted:
+        row.isAvailableToday && row.todayStartTime && row.todayEndTime
+          ? `Available today: ${row.todayStartTime} - ${row.todayEndTime}`
+          : "Unavailable today",
+      isExceptionOverride: row.isExceptionAvailable !== null,
+    },
+  }));
 }
 
 /**
@@ -240,6 +304,8 @@ export async function createProvider(
         bio: input.bio ?? null,
         avatarUrl: input.avatarUrl ?? null,
         isActive: input.isActive ?? true,
+        latitude: input.latitude ?? null,
+        longitude: input.longitude ?? null
       })
       .returning();
 
