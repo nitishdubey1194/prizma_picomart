@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { menus } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertTenantRecordExists, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql, asc } from "drizzle-orm";
 
@@ -105,25 +105,16 @@ export async function createMenuItem(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify parent item exists and belongs to the same tenant if provided[cite: 1]
     if (input.parentId) {
-      const [parent] = await tx
-        .select({ id: menus.id })
-        .from(menus)
-        .where(
-          and(
-            eq(menus.id, Number(input.parentId)),
-            eq(menus.tenantId, pTenantId)
-          )
-        )
-        .limit(1);
-
-      if (!parent) {
-        throw new AppError(404, "Parent menu item not found for this tenant.");
-      }
+      await assertTenantRecordExists(
+        tx,
+        menus,
+        pTenantId,
+        input.parentId,
+        "Parent menu item not found for this tenant."
+      );
     }
 
-    // 2. Insert item[cite: 1]
     const [newItem] = await tx
       .insert(menus)
       .values({
@@ -158,7 +149,7 @@ export async function updateMenuItem(
   const pItemIdBigInt = Number(itemId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // Prevent setting self as parent[cite: 1]
+    // Prevent setting self as parent
     if (input.parentId != null && Number(input.parentId) === pItemIdBigInt) {
       throw new AppError(400, "A menu item cannot be its own parent.");
     }

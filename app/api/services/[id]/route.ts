@@ -9,9 +9,7 @@ import {
 } from "@/app/features/services/services.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/services/[id]">;
 
 export async function GET(
   _request: NextRequest,

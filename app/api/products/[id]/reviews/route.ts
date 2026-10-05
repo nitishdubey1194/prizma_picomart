@@ -8,9 +8,7 @@ import {
 } from "@/app/features/reviews/reviews.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/products/[id]/reviews">;
 
 export async function GET(
   _request: NextRequest,

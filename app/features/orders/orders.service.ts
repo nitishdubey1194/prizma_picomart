@@ -5,7 +5,6 @@ import {
   userCarts,
   productVariants,
   products,
-  stores,
   userAddresses,
   orderStatusLogs,
 } from "@/drizzle/schema";

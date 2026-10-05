@@ -4,12 +4,7 @@ import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { deleteRecurringBlock } from "@/app/features/availability/availability.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{
-    id: string;
-    blockId: string;
-  }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/availability/[blockId]">;
 
 export async function DELETE(
   request: NextRequest,

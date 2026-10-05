@@ -39,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (error instanceof AppError) {
       return NextResponse.json(
         { error: error.message },
-        { status: 400 }
+        { status: error.status }
       );
     }
     const message =
@@ -91,11 +91,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error instanceof AppError) {
       return NextResponse.json(
         { error: error.message },
-        { status: 400 }
+        { status: error.status }
       );
     }
-    const message =
-      error instanceof Error ? error.message : "Failed to book appointment";
-    return NextResponse.json({ error: message }, { status: 400 });
+    console.error("Appointment booking failed:", error);
+    return NextResponse.json({ error: "Failed to book appointment." }, { status: 500 });
   }
 }

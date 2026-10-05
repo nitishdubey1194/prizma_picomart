@@ -1,6 +1,10 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { providers, providerServices, services, users } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import {
+  assertTenantRecordExists,
+  assertUniqueTenantSlug,
+  withTenantContext,
+} from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql, asc } from "drizzle-orm";
 
@@ -138,7 +142,7 @@ export async function getTenantProviders(tenantId: number | bigint) {
     .where(
       and(
         eq(providers.tenantId, pTenantId),
-        // eq(providers.isActive, true)
+          eq(providers.isActive, true)
       )
     )
     .orderBy(asc(providers.name));
@@ -212,36 +216,18 @@ export async function createProvider(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify slug uniqueness for this tenant[cite: 1]
-    const [existingSlug] = await tx
-      .select({ id: providers.id })
-      .from(providers)
-      .where(
-        and(
-          eq(providers.tenantId, pTenantId),
-          eq(providers.slug, input.slug)
-        )
-      )
-      .limit(1);
+    await assertUniqueTenantSlug(tx, providers, pTenantId, input.slug);
 
-    if (existingSlug) {
-      throw new AppError(409, "A provider with this slug already exists.");
-    }
-
-    // 2. Validate linked user if specified[cite: 1]
     if (input.userId) {
-      const [existingUser] = await tx
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.id, input.userId))
-        .limit(1);
-
-      if (!existingUser) {
-        throw new AppError(404, "User account to link not found.");
-      }
+      await assertTenantRecordExists(
+        tx,
+        users,
+        pTenantId,
+        input.userId,
+        "User account to link not found."
+      );
     }
 
-    // 3. Insert provider record[cite: 1]
     const [newProvider] = await tx
       .insert(providers)
       .values({
@@ -275,21 +261,13 @@ export async function updateProvider(
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.slug) {
-      const [existingSlug] = await tx
-        .select({ id: providers.id })
-        .from(providers)
-        .where(
-          and(
-            eq(providers.tenantId, pTenantId),
-            eq(providers.slug, input.slug),
-            sql`${providers.id} != ${pProviderId}`
-          )
-        )
-        .limit(1);
-
-      if (existingSlug) {
-        throw new AppError(409, "A provider with this slug already exists.");
-      }
+      await assertUniqueTenantSlug(
+        tx,
+        providers,
+        pTenantId,
+        input.slug,
+        pProviderId
+      );
     }
 
     const updatePayload: Record<string, unknown> = {
@@ -336,18 +314,6 @@ export async function linkUserToProvider(
   const pProviderId = Number(providerId);
 
   return await withTenantContext(pTenantId, adminUserId, async (tx) => {
-    // 1. Verify user exists[cite: 1]
-    // const [user] = await tx
-    //   .select({ id: users.id })
-    //   .from(users)
-    //   .where(eq(users.id, input.userId))
-    //   .limit(1);
-
-    // if (!user) {
-    //   throw new AppError(404, "User account not found.");
-    // }
-
-    // 2. Link provider[cite: 1]
     const [updated] = await tx
       .update(providers)
       .set({

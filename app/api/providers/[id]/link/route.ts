@@ -7,9 +7,7 @@ import {
 } from "@/app/features/providers/providers.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/link">;
 
 export async function POST(
   request: NextRequest,

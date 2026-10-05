@@ -4,9 +4,7 @@ import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { getOrderById } from "@/app/features/orders/orders.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/orders/[id]">;
 
 export async function GET(
   _request: NextRequest,

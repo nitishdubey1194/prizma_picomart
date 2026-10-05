@@ -10,13 +10,11 @@ import {
 } from "@/app/features/providers/providers.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]">;
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: RouteContext<"/api/providers/[id]">
 ) {
   const { id } = await params;
   const tenant = await getCurrentTenant();

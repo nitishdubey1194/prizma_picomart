@@ -5,9 +5,7 @@ import { getCurrentTenant } from "@/lib/tenant";
 import { upsertProviderService, getProviderServices } from "@/app/features/providers/provider-services.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/services">;
 
 export async function GET(
   _request: NextRequest,
@@ -44,7 +42,7 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: RouteContext<"/api/providers/[id]/services">
 ) {
   try {
     const user = await getAuthUser(req);

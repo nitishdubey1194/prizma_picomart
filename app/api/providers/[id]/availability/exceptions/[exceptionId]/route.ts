@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentTenant } from "@/lib/tenant";
 import { getAuthUser } from "@/app/features/auth/auth.utils";
-import { removeProviderException } from "@/app/features/availability/availability.service";
+import { deleteDateException } from "@/app/features/availability/availability.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{
-    id: string;
-    exceptionId: string;
-  }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/availability/exceptions/[exceptionId]">;
 
 export async function DELETE(
   request: NextRequest,
@@ -34,7 +29,7 @@ export async function DELETE(
 
     const tenant = await getCurrentTenant();
 
-    const result = await removeProviderException(
+    const result = await deleteDateException(
       tenant.id,
       user.id,
       providerId,

@@ -7,9 +7,7 @@ import {
 } from "@/app/features/orders/orders.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/orders/[id]/status">;
 
 const ALLOWED_STATUSES: UpdateOrderStatusInput["status"][] = [
   "pending",

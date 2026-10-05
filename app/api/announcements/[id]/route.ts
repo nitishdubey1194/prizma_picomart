@@ -8,9 +8,7 @@ import {
 } from "@/app/features/announcements/announcements.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/announcements/[id]">;
 
 export async function PATCH(
   request: NextRequest,

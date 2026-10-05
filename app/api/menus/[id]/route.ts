@@ -8,9 +8,7 @@ import {
 } from "@/app/features/menus/menus.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/menus/[id]">;
 
 export async function PATCH(
   request: NextRequest,

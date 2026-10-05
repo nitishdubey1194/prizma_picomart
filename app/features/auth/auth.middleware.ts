@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { rolePermissions, tenantUsers } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
@@ -106,7 +106,7 @@ export async function hasPermission(
   userId: string,
   permission: PermissionName
 ): Promise<boolean> {
-  // 1. Fetch user's role in this tenant[cite: 1]
+  // Fetch user's role in this tenant
   const [membership] = await db
     .select({
       role: tenantUsers.role,
@@ -126,12 +126,12 @@ export async function hasPermission(
     return false;
   }
 
-  // Super admins bypass individual permission checks[cite: 1]
+  // Super admins bypass individual permission checks
   if (membership.role === "super_admin") {
     return true;
   }
 
-  // 2. Query role_permissions junction table[cite: 1]
+  // Query role_permissions junction table
   const [granted] = await db
     .select({ id: rolePermissions.id })
     .from(rolePermissions)

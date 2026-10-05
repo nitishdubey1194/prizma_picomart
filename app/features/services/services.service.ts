@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { services, providerServices } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
@@ -204,7 +204,7 @@ export async function updateService(
       throw new AppError(400, "Service duration must be greater than 0 minutes.");
     }
 
-    // Check slug collision[cite: 1]
+    // Check slug collision
     if (input.slug) {
       const [existingSlug] = await tx
         .select({ id: services.id })

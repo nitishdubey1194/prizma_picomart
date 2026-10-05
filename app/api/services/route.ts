@@ -8,7 +8,7 @@ import {
 } from "@/app/features/services/services.service";
 import { AppError } from "@/lib/errors";
 
-export async function GET(_request: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   try {
     const tenant = await getCurrentTenant();
     const list = await getTenantServices(tenant.id);

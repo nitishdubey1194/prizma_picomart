@@ -4,7 +4,6 @@ import {
   orders,
   orderItems,
   productRatings,
-  users,
 } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
@@ -22,6 +21,16 @@ export interface UpdateReviewInput {
   review?: string | null;
 }
 
+function assertValidRating(rating: number): number {
+  const normalized = Math.round(Number(rating));
+
+  if (normalized < 1 || normalized > 5) {
+    throw new AppError(400, "Rating must be an integer between 1 and 5.");
+  }
+
+  return normalized;
+}
+
 /**
  * Submits a rating/review for an item from a delivered order.
  */
@@ -34,11 +43,7 @@ export async function createProductReview(
   const pOrderId = Number(input.orderId);
   const pOrderIdBigInt = Number(input.orderId);
   const pProductId = Number(input.productId);
-  const ratingVal = Math.round(Number(input.rating));
-
-  if (ratingVal < 1 || ratingVal > 5) {
-    throw new AppError(400, "Rating must be an integer between 1 and 5.");
-  }
+  const ratingVal = assertValidRating(input.rating);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     // 1. Verify order belongs to user, belongs to tenant, and is delivered
@@ -184,11 +189,7 @@ export async function updateProductReview(
     };
 
     if (input.rating !== undefined) {
-      const ratingVal = Math.round(Number(input.rating));
-      if (ratingVal < 1 || ratingVal > 5) {
-        throw new AppError(400, "Rating must be an integer between 1 and 5.");
-      }
-      updatePayload.rating = ratingVal;
+      updatePayload.rating = assertValidRating(input.rating);
     }
 
     if (input.review !== undefined) {

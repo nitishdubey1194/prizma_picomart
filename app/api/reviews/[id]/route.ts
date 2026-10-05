@@ -7,9 +7,7 @@ import {
 } from "@/app/features/reviews/reviews.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/reviews/[id]">;
 
 export async function PATCH(
   request: NextRequest,

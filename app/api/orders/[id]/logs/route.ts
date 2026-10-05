@@ -6,9 +6,7 @@ import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { AppError } from "@/lib/errors";
 import { and, eq, desc } from "drizzle-orm";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/orders/[id]/logs">;
 
 export async function GET(
   request: NextRequest,

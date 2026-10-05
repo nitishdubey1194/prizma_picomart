@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getTenantBySubdomain } from "@/app/features/tenants/tenants.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ subdomain: string }>;
-}
+type RouteParams = RouteContext<"/api/tenants/[subdomain]">;
 
 export async function GET(
   _request: NextRequest,

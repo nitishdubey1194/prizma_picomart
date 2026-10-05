@@ -1,5 +1,5 @@
-import { db } from "@/lib/db";
-import { tenants, tenantUsers, themes, plans, users } from "@/drizzle/schema";
+import { db } from "@/lib/db/index";
+import { tenants, tenantUsers, themes, plans } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql } from "drizzle-orm";
@@ -159,7 +159,7 @@ export async function createTenant(
     );
   }
 
-  // 2. Check subdomain availability[cite: 1]
+  // Check subdomain availability
   const [existingTenant] = await db
     .select({ id: tenants.id })
     .from(tenants)
@@ -170,7 +170,7 @@ export async function createTenant(
     throw new AppError(409, "This subdomain is already taken.");
   }
 
-  // 3. Verify target subscription plan exists[cite: 1]
+  // Verify target subscription plan exists
   const [targetPlan] = await db
     .select({ id: plans.id, isActive: plans.isActive })
     .from(plans)
@@ -181,7 +181,7 @@ export async function createTenant(
     throw new AppError(404, "Invalid or inactive plan selected.");
   }
 
-  // 4. Verify theme if supplied[cite: 1]
+  // Verify theme if supplied
   if (input.themeId) {
     const [targetTheme] = await db
       .select({ id: themes.id })
@@ -199,7 +199,7 @@ export async function createTenant(
     }
   }
 
-  // 5. Execute creation within a database transaction[cite: 1]
+  // Execute creation within a database transaction
   return await db.transaction(async (tx) => {
     const [newTenant] = await tx
       .insert(tenants)
@@ -213,7 +213,7 @@ export async function createTenant(
       })
       .returning();
 
-    // Map owner into tenant_users with 'admin' role[cite: 1]
+    // Map owner into tenant_users with 'admin' role
     await tx.insert(tenantUsers).values({
       tenantId: Number(newTenant.id),
       userId: ownerUserId,
@@ -240,7 +240,7 @@ export async function updateTenant(
   const pTenantIdBigInt = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Check subdomain collisions if updating[cite: 1]
+    // Check subdomain collisions if updating
     if (input.subdomain) {
       const cleanSubdomain = input.subdomain.trim().toLowerCase();
 
@@ -260,7 +260,7 @@ export async function updateTenant(
       }
     }
 
-    // 2. Validate theme if updated[cite: 1]
+    // Validate theme if updated
     if (input.themeId !== undefined && input.themeId !== null) {
       const [targetTheme] = await tx
         .select({ id: themes.id })

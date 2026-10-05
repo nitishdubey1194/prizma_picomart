@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { productVariants, products } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertTenantRecordExists, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, sql } from "drizzle-orm";
 export type JsonPrimitive = string | number | boolean | null;
@@ -86,23 +86,14 @@ export async function createProductVariant(
   const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Validate that the parent product belongs to this tenant[cite: 1]
-    const [product] = await tx
-      .select({ id: products.id })
-      .from(products)
-      .where(
-        and(
-          eq(products.id, pProductIdBigInt),
-          eq(products.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
+    await assertTenantRecordExists(
+      tx,
+      products,
+      pTenantId,
+      pProductIdBigInt,
+      "Parent product not found for this tenant."
+    );
 
-    if (!product) {
-      throw new AppError(404, "Parent product not found for this tenant.");
-    }
-
-    // 2. Insert variant[cite: 1]
     const [newVariant] = await tx
       .insert(productVariants)
       .values({

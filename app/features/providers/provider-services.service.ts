@@ -1,8 +1,8 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { providerServices, services, providers } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertTenantRecordExists, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export interface AssignServiceWithOverridesInput {
   serviceId: number;
@@ -78,39 +78,9 @@ export async function assignServiceToProvider(
   const pServiceId = Number(input.serviceId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify provider belongs to tenant[cite: 1]
-    const [provider] = await tx
-      .select({ id: providers.id })
-      .from(providers)
-      .where(
-        and(
-          eq(providers.id, pProviderId),
-          eq(providers.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
+    await assertTenantRecordExists(tx, providers, pTenantId, pProviderId, "Provider not found.");
+    await assertTenantRecordExists(tx, services, pTenantId, pServiceId, "Service not found.");
 
-    if (!provider) {
-      throw new AppError(404, "Provider not found.");
-    }
-
-    // 2. Verify service exists for this tenant[cite: 1]
-    const [service] = await tx
-      .select({ id: services.id })
-      .from(services)
-      .where(
-        and(
-          eq(services.id, pServiceId),
-          eq(services.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
-
-    if (!service) {
-      throw new AppError(404, "Service not found.");
-    }
-
-    // 3. Check for existing mapping[cite: 1]
     const [existing] = await tx
       .select({ id: providerServices.id })
       .from(providerServices)
@@ -127,7 +97,7 @@ export async function assignServiceToProvider(
       throw new AppError(409, "Service is already assigned to this provider.");
     }
 
-    // 4. Insert mapping[cite: 1]
+    // Insert mapping
     const [mapping] = await tx
       .insert(providerServices)
       .values({

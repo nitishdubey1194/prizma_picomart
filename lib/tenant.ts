@@ -1,8 +1,9 @@
 import { AppError } from "./errors";
 import { db } from "@/lib/db/index";
 import { tenants } from "@/drizzle/schema";
-import { sql, type ExtractTablesWithRelations } from "drizzle-orm";
-import type { PgTransaction } from "drizzle-orm/pg-core";
+import { headers } from "next/headers";
+import { and, eq, sql, type ExtractTablesWithRelations } from "drizzle-orm";
+import type { AnyPgColumn, AnyPgTable, PgTransaction } from "drizzle-orm/pg-core";
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
 
 export interface Tenant {
@@ -11,21 +12,33 @@ export interface Tenant {
   subdomain: string;
 }
 
-// 1. Properly extract the transaction client type with your schema models
-type SchemaType = typeof import("@/lib/db");
+type SchemaType = typeof import("@/lib/db/index");
 export type DrizzleTransaction = PgTransaction<
   PostgresJsQueryResultHKT,
   SchemaType,
   ExtractTablesWithRelations<SchemaType>
 >;
 
-/**
- * Resolves current tenant via Drizzle.
- * Fetches the first tenant row for single-tenant mode or subdomain lookup.
- */
+type TenantTable = AnyPgTable & {
+  id: AnyPgColumn;
+  tenantId: AnyPgColumn;
+};
+type TenantSlugTable = TenantTable & { slug: AnyPgColumn };
+type DefaultTenantTable = TenantTable & {
+  isDefault: AnyPgColumn;
+  updatedAt: AnyPgColumn;
+};
+type UserDefaultTenantTable = DefaultTenantTable & { userId: AnyPgColumn };
+
 export async function getCurrentTenant(): Promise<Tenant> {
   try {
+    const tenantSlug = (await headers()).get("x-tenant-slug")?.trim().toLowerCase();
+    if (!tenantSlug) {
+      throw new AppError(400, "Tenant slug header is required.");
+    }
+
     const tenant = await db.query.tenants.findFirst({
+      where: eq(tenants.subdomain, tenantSlug),
       columns: {
         id: true,
         name: true,
@@ -33,9 +46,8 @@ export async function getCurrentTenant(): Promise<Tenant> {
       },
     });
 
-    // findFirst returns undefined when no record matches
     if (!tenant) {
-      throw new AppError(404, "Tenant not foundss.");
+      throw new AppError(404, "Tenant not found.");
     }
 
     return tenant;
@@ -47,10 +59,6 @@ export async function getCurrentTenant(): Promise<Tenant> {
   }
 }
 
-/**
- * Scopes database operations within an isolated transaction,
- * setting PostgreSQL session variables for RLS and procedure tracking.
- */
 export async function withTenantContext<T>(
   tenantId: number | bigint,
   userId: string | null,
@@ -74,4 +82,76 @@ export async function withTenantContext<T>(
 
     return await callback(tx as unknown as DrizzleTransaction);
   });
+}
+
+export async function unsetDefaultForTenantUser(
+  tx: DrizzleTransaction,
+  table: UserDefaultTenantTable,
+  tenantId: number,
+  userId: string
+): Promise<void> {
+  await tx
+    .update(table)
+    .set({ isDefault: false, updatedAt: sql`now()` })
+    .where(and(eq(table.tenantId, tenantId), eq(table.userId, userId)));
+}
+
+export async function assertUniqueTenantSlug(
+  tx: DrizzleTransaction,
+  table: TenantSlugTable,
+  tenantId: number,
+  slug: string,
+  excludeId?: number | bigint | string
+): Promise<void> {
+  const clauses = [eq(table.tenantId, tenantId), eq(table.slug, slug)];
+
+  if (excludeId !== undefined) {
+    clauses.push(sql`${table.id} != ${BigInt(excludeId)}`);
+  }
+
+  const [existing] = await tx
+    .select({ id: table.id })
+    .from(table)
+    .where(and(...clauses))
+    .limit(1);
+
+  if (existing) {
+    throw new AppError(409, "A record with this slug already exists.");
+  }
+}
+
+export async function assertTenantRecordExists(
+  tx: DrizzleTransaction,
+  table: TenantTable,
+  tenantId: number,
+  recordId: number | bigint | string,
+  message = "Record not found."
+): Promise<void> {
+  const [row] = await tx
+    .select({ id: table.id })
+    .from(table)
+    .where(and(eq(table.id, Number(recordId)), eq(table.tenantId, tenantId)))
+    .limit(1);
+
+  if (!row) {
+    throw new AppError(404, message);
+  }
+}
+
+export async function unsetDefaultForTenant(
+  tx: DrizzleTransaction,
+  table: DefaultTenantTable,
+  tenantId: number,
+  excludeId?: number | bigint | string
+): Promise<void> {
+  const conditions = [eq(table.tenantId, tenantId)];
+
+  if (excludeId !== undefined) {
+    conditions.push(sql`${table.id} != ${BigInt(excludeId)}`);
+  }
+
+  await tx
+    .update(table)
+    .set({ isDefault: false, updatedAt: sql`now()` })
+    .where(and(...conditions));
 }

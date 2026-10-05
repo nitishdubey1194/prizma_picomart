@@ -3,6 +3,7 @@ import { getCurrentTenant } from "@/lib/tenant";
 import { refreshTokenSchema } from "@/app/features/auth/auth.schema";
 import { refreshUserTokens } from "@/app/features/auth/auth.service";
 import { AppError } from "@/lib/errors";
+import { ZodError } from "zod";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -14,10 +15,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ tokens }, { status: 200 });
   } catch (error: unknown) {
-    if (error instanceof AppError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid refresh token." }, { status: 400 });
     }
-    const message = error instanceof Error ? error.message : "Token refresh failed";
-    return NextResponse.json({ error: message }, { status: 401 });
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    console.error("Token refresh failed:", error);
+    return NextResponse.json({ error: "Token refresh failed." }, { status: 500 });
   }
 }

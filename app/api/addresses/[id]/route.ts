@@ -8,13 +8,9 @@ import {
 } from "@/app/features/addresses/addresses.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
-
 export async function PATCH(
   request: NextRequest,
-  { params }: RouteParams
+  { params }: RouteContext<"/api/addresses/[id]">
 ): Promise<NextResponse> {
   try {
     const user = await getAuthUser(request);
@@ -52,7 +48,7 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: RouteParams
+  { params }: RouteContext<"/api/addresses/[id]">
 ): Promise<NextResponse> {
   try {
     const user = await getAuthUser(request);

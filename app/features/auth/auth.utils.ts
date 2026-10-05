@@ -5,7 +5,6 @@ import { NextRequest } from "next/server";
 import { AuthenticatedUser, TokenPayload } from "./auth.types";
 
 const JWT_SECRET: string = process.env.JWT_SECRET ?? "default-access-secret-minimum-32-chars";
-const REFRESH_SECRET: string = process.env.JWT_REFRESH_SECRET ?? "default-refresh-secret-minimum-32-chars";
 const SALT_ROUNDS = 12;
 
 export async function hashPassword(password: string): Promise<string> {

@@ -1,6 +1,7 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { users, profiles, refreshTokens, tenantUsers, userRoles } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
+import { withTenantContext } from "@/lib/tenant";
 import { and, eq, isNull, sql, or } from "drizzle-orm";
 import { RegisterInput, LoginInput, AuthResponse, AuthTokens } from "./auth.types";
 import {
@@ -20,29 +21,28 @@ export async function registerUser(
   const normalizedEmail = input.email.toLowerCase().trim();
   const normalizedMobile = input.mobile.trim();
   const fullname = input.fullname.trim();
-  // 1. Check existing user
-  const [existingUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(
-      and(
-        eq(users.tenantId, tenantId),
-        or(
-          sql`LOWER(${users.email}) = ${normalizedEmail}`,
-          eq(users.mobile, normalizedMobile)
-        )
-      )
-    )
-    .limit(1);
-
-  if (existingUser) {
-    throw new AppError(409, "User with this email or mobile already exists.");
-  }
-
   const passwordHash = await hashPassword(input.password);
 
-  return await db.transaction(async (tx) => {
-    // 2. Insert user[cite: 1]
+  return await withTenantContext(tenantId, null, async (tx) => {
+    const [existingUser] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.tenantId, tenantId),
+          or(
+            sql`LOWER(${users.email}) = ${normalizedEmail}`,
+            eq(users.mobile, normalizedMobile)
+          )
+        )
+      )
+      .limit(1);
+
+    if (existingUser) {
+      throw new AppError(409, "User with this email or mobile already exists.");
+    }
+
+    // Insert user
     const [newUser] = await tx
       .insert(users)
       .values({
@@ -54,7 +54,7 @@ export async function registerUser(
       })
       .returning({ id: users.id });
 
-    // 3. Insert profile[cite: 1]
+    // Insert profile
     await tx.insert(profiles).values({
       id: newUser.id,
       fullName: input.fullname ?? null,
@@ -68,7 +68,7 @@ export async function registerUser(
       role: "customer",
     });
 
-    // 4. Bind membership in tenant_users[cite: 1]
+    // Bind membership in tenant_users
     await tx.insert(tenantUsers).values({
       tenantId,
       userId: newUser.id,
@@ -76,7 +76,7 @@ export async function registerUser(
       isActive: true,
     });
 
-    // 5. Generate and store refresh token[cite: 1]
+    // Generate and store refresh token
     const rawRefreshToken = generateRefreshToken();
     const tokenDigest = hashToken(rawRefreshToken);
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -133,7 +133,12 @@ export async function loginUser(
         eq(tenantUsers.tenantId, tenantId)
       )
     )
-    .where(sql`LOWER(${users.email}) = ${normalizedEmail}`)
+    .where(
+      and(
+        eq(users.tenantId, tenantId),
+        sql`LOWER(${users.email}) = ${normalizedEmail}`
+      )
+    )
     .limit(1);
   // Return generic 401 if user not found in this tenant
   if (!record) {
@@ -145,7 +150,6 @@ export async function loginUser(
     input.password,
     record.passwordHash
   );
-  console.log(isPasswordValid)
   if (!isPasswordValid) {
     throw new AppError(401, "Invalid email or password.");
   }
@@ -199,7 +203,7 @@ export async function refreshUserTokens(
 ): Promise<AuthTokens> {
   const tokenDigest = hashToken(rawRefreshToken);
 
-  // 1. Match active and unrevoked refresh token[cite: 1]
+  // Match active and unrevoked refresh token
   const [storedToken] = await db
     .select({
       id: refreshTokens.id,
@@ -211,16 +215,18 @@ export async function refreshUserTokens(
     })
     .from(refreshTokens)
     .innerJoin(users, eq(users.id, refreshTokens.userId))
-    .leftJoin(
+    .innerJoin(
       tenantUsers,
       and(
         eq(tenantUsers.userId, refreshTokens.userId),
-        eq(tenantUsers.tenantId, tenantId)
+        eq(tenantUsers.tenantId, tenantId),
+        eq(tenantUsers.isActive, true)
       )
     )
     .where(
       and(
         eq(refreshTokens.tokenHash, tokenDigest),
+        eq(refreshTokens.tenantId, tenantId),
         isNull(refreshTokens.revokedAt)
       )
     )
@@ -234,16 +240,27 @@ export async function refreshUserTokens(
     throw new AppError(401, "Refresh token has expired. Please log in again.");
   }
 
-  // 2. Token rotation: revoke old token and emit a new one[cite: 1]
+  // Token rotation: revoke old token and emit a new one
   const nextRawRefreshToken = generateRefreshToken();
   const nextTokenDigest = hashToken(nextRawRefreshToken);
   const nextExpiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   await db.transaction(async (tx) => {
-    await tx
+    const [revokedToken] = await tx
       .update(refreshTokens)
       .set({ revokedAt: new Date().toISOString() })
-      .where(eq(refreshTokens.id, storedToken.id));
+      .where(
+        and(
+          eq(refreshTokens.id, storedToken.id),
+          eq(refreshTokens.tenantId, tenantId),
+          isNull(refreshTokens.revokedAt)
+        )
+      )
+      .returning({ id: refreshTokens.id });
+
+    if (!revokedToken) {
+      throw new AppError(401, "Invalid or revoked refresh token.");
+    }
 
     await tx.insert(refreshTokens).values({
       tenantId: tenantId,

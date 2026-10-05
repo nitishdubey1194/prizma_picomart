@@ -8,9 +8,7 @@ import {
 } from "@/app/features/products/product-variants.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteContext {
-  params: Promise<{ id: string; variantId: string }>;
-}
+type ProductVariantRouteParams = RouteContext<"/api/products/[id]/variants/[variantId]">;
 
 interface UpdateVariantBody {
   variantName?: string;
@@ -52,7 +50,7 @@ function parseUserId(req: NextRequest): string {
 
 export async function PATCH(
   req: NextRequest,
-  context: RouteContext
+  context: ProductVariantRouteParams
 ): Promise<NextResponse> {
   try {
     const { variantId } = await context.params;
@@ -132,7 +130,7 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  context: RouteContext
+  context: ProductVariantRouteParams
 ): Promise<NextResponse> {
   try {
     const { variantId } = await context.params;

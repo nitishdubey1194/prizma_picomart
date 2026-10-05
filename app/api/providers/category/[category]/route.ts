@@ -4,9 +4,7 @@ import { getCurrentTenant } from "@/lib/tenant";
 import { getProvidersByCategory } from "@/app/features/providers/providers.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ category: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/category/[category]">;
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   try {

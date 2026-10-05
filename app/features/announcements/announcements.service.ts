@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { announcements, stores } from "@/drizzle/schema";
 import { withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";

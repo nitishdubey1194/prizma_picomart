@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import {
   appointments,
   appointmentStatusLogs,
@@ -289,21 +289,21 @@ export async function createAppointment(
       throw new AppError(404, "Provider not found or currently inactive.");
     }
 
-    // 2. Fetch base service and provider override price[cite: 1]
+    // Fetch base service and provider override price
     const [serviceMapping] = await tx
       .select({
         serviceId: services.id,
         basePrice: services.price,
         overridePrice: providerServices.priceOverride,
-        isMappingActive: providerServices.isActive,
       })
       .from(services)
-      .leftJoin(
+      .innerJoin(
         providerServices,
         and(
           eq(providerServices.serviceId, services.id),
           eq(providerServices.providerId, pProviderId),
           eq(providerServices.tenantId, pTenantId),
+          eq(providerServices.isActive, true),
         ),
       )
       .where(
@@ -367,8 +367,8 @@ export async function createAppointment(
         ? String(serviceMapping.overridePrice)
         : String(serviceMapping.basePrice);
 
-    // 3. Check for overlapping active appointments for this provider[cite: 1]
-    const check = await tx.execute(
+    // Check for overlapping active appointments for this provider
+    await tx.execute(
       sql`SELECT current_setting('app.current_user_id', true) AS current_user, auth.uid() AS auth_uid`,
     );
     const [overlapping] = await tx
@@ -387,7 +387,7 @@ export async function createAppointment(
     if (overlapping) {
       throw new AppError(409, "The selected time slot is no longer available.");
     }
-    // 4. Insert appointment record[cite: 1]
+    // Insert appointment record
     const [newAppointment] = await tx
       .insert(appointments)
       .values({
@@ -403,7 +403,7 @@ export async function createAppointment(
         customerNotes: input.customerNotes ?? null,
       })
       .returning();
-    // 5. Append initial creation entry to status audit log[cite: 1]
+    // Append initial creation entry to status audit log
     await tx.insert(appointmentStatusLogs).values({
       tenantId: pTenantId,
       appointmentId: newAppointment.id,
@@ -468,7 +468,7 @@ export async function updateAppointmentStatus(
       )
       .returning();
 
-    // Append to status logs[cite: 1]
+    // Append to status logs
     await tx.insert(appointmentStatusLogs).values({
       tenantId: pTenantId,
       appointmentId: pAppointmentId,
@@ -481,17 +481,4 @@ export async function updateAppointmentStatus(
   });
 }
 
-/**
- * Cancels an appointment.
- */
-export async function cancelAppointment(
-  tenantId: number | bigint,
-  userId: string,
-  appointmentId: number | bigint | string,
-  reason?: string | null,
-) {
-  return await updateAppointmentStatus(tenantId, userId, appointmentId, {
-    status: "cancelled",
-    remarks: reason ?? "Cancelled by user.",
-  });
-}
+

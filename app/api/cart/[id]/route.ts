@@ -7,9 +7,7 @@ import {
 } from "@/app/features/cart/cart.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/cart/[id]">;
 
 export async function PATCH(
   request: NextRequest,

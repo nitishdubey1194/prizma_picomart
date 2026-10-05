@@ -1,6 +1,6 @@
 import { db } from "@/lib/db/index";
 import { userAddresses } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { unsetDefaultForTenantUser, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, desc, sql } from "drizzle-orm";
 
@@ -64,17 +64,8 @@ export async function createUserAddress(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // If setting as default, clear existing default flag for this user
     if (input.isDefault) {
-      await tx
-        .update(userAddresses)
-        .set({ isDefault: false, updatedAt: sql`now()` })
-        .where(
-          and(
-            eq(userAddresses.tenantId, pTenantId),
-            eq(userAddresses.userId, userId)
-          )
-        );
+      await unsetDefaultForTenantUser(tx, userAddresses, pTenantId, userId);
     }
 
     const [newAddress] = await tx
@@ -114,15 +105,7 @@ export async function updateUserAddress(
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.isDefault) {
-      await tx
-        .update(userAddresses)
-        .set({ isDefault: false, updatedAt: sql`now()` })
-        .where(
-          and(
-            eq(userAddresses.tenantId, pTenantId),
-            eq(userAddresses.userId, userId)
-          )
-        );
+      await unsetDefaultForTenantUser(tx, userAddresses, pTenantId, userId);
     }
 
     const updatePayload: Record<string, unknown> = {

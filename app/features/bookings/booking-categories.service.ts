@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { bookingCategories } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertUniqueTenantSlug, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, asc, sql } from "drizzle-orm";
 
@@ -60,20 +60,7 @@ export async function createBookingCategory(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    const [existing] = await tx
-      .select({ id: bookingCategories.id })
-      .from(bookingCategories)
-      .where(
-        and(
-          eq(bookingCategories.tenantId, pTenantId),
-          eq(bookingCategories.slug, input.slug)
-        )
-      )
-      .limit(1);
-
-    if (existing) {
-      throw new AppError(409, "A booking category with this slug already exists.");
-    }
+    await assertUniqueTenantSlug(tx, bookingCategories, pTenantId, input.slug);
 
     const [created] = await tx
       .insert(bookingCategories)
@@ -104,21 +91,13 @@ export async function updateBookingCategory(
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.slug) {
-      const [existing] = await tx
-        .select({ id: bookingCategories.id })
-        .from(bookingCategories)
-        .where(
-          and(
-            eq(bookingCategories.tenantId, pTenantId),
-            eq(bookingCategories.slug, input.slug),
-            sql`${bookingCategories.id} != ${pCategoryId}`
-          )
-        )
-        .limit(1);
-
-      if (existing) {
-        throw new AppError(409, "A booking category with this slug already exists.");
-      }
+      await assertUniqueTenantSlug(
+        tx,
+        bookingCategories,
+        pTenantId,
+        input.slug,
+        pCategoryId
+      );
     }
 
     const updatePayload: Record<string, unknown> = {

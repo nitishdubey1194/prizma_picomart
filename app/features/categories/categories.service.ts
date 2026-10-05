@@ -1,8 +1,12 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { categories } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import {
+  assertTenantRecordExists,
+  assertUniqueTenantSlug,
+  withTenantContext,
+} from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
-import { and, eq, sql, desc, asc } from "drizzle-orm";
+import { and, eq, sql, asc } from "drizzle-orm";
 
 export interface CreateCategoryInput {
   name: string;
@@ -96,41 +100,18 @@ export async function createCategory(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify slug uniqueness for this tenant[cite: 1]
-    const [existingSlug] = await tx
-      .select({ id: categories.id })
-      .from(categories)
-      .where(
-        and(
-          eq(categories.tenantId, pTenantId),
-          eq(categories.slug, input.slug)
-        )
-      )
-      .limit(1);
+    await assertUniqueTenantSlug(tx, categories, pTenantId, input.slug);
 
-    if (existingSlug) {
-      throw new AppError(409, "A category with this slug already exists.");
-    }
-
-    // 2. Validate parent category if provided[cite: 1]
     if (input.parentId) {
-      const [parent] = await tx
-        .select({ id: categories.id })
-        .from(categories)
-        .where(
-          and(
-            eq(categories.id, Number(input.parentId)),
-            eq(categories.tenantId, pTenantId)
-          )
-        )
-        .limit(1);
-
-      if (!parent) {
-        throw new AppError(404, "Parent category not found.");
-      }
+      await assertTenantRecordExists(
+        tx,
+        categories,
+        pTenantId,
+        input.parentId,
+        "Parent category not found."
+      );
     }
 
-    // 3. Insert category[cite: 1]
     const [newCategory] = await tx
       .insert(categories)
       .values({
@@ -163,28 +144,18 @@ export async function updateCategory(
   const pCategoryIdBigInt = BigInt(categoryId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // Prevent setting self as parent category[cite: 1]
     if (input.parentId != null && BigInt(input.parentId) === pCategoryIdBigInt) {
       throw new AppError(400, "A category cannot be its own parent.");
     }
 
-    // Check slug collision[cite: 1]
     if (input.slug) {
-      const [existingSlug] = await tx
-        .select({ id: categories.id })
-        .from(categories)
-        .where(
-          and(
-            eq(categories.tenantId, pTenantId),
-            eq(categories.slug, input.slug),
-            sql`${categories.id} != ${pCategoryIdBigInt}`
-          )
-        )
-        .limit(1);
-
-      if (existingSlug) {
-        throw new AppError(409, "A category with this slug already exists.");
-      }
+      await assertUniqueTenantSlug(
+        tx,
+        categories,
+        pTenantId,
+        input.slug,
+        Number(pCategoryIdBigInt)
+      );
     }
 
     const updatePayload: Record<string, unknown> = {

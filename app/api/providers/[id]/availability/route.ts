@@ -8,9 +8,7 @@ import {
 } from "@/app/features/availability/availability.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/availability">;
 
 export async function GET(
   _request: NextRequest,

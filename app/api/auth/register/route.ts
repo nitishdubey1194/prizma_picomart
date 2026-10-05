@@ -3,6 +3,7 @@ import { getCurrentTenant } from "@/lib/tenant";
 import { registerSchema } from "@/app/features/auth/auth.schema";
 import { registerUser } from "@/app/features/auth/auth.service";
 import { AppError } from "@/lib/errors";
+import { ZodError } from "zod";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -14,10 +15,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(result, { status: 201 });
   } catch (error: unknown) {
-    if (error instanceof AppError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid registration details." }, { status: 400 });
     }
-    const message = error instanceof Error ? error.message : "Failed to register";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof AppError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    console.error("Registration failed:", error);
+    return NextResponse.json({ error: "Registration failed." }, { status: 500 });
   }
 }

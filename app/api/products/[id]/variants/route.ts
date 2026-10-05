@@ -8,9 +8,7 @@ import {
 } from "@/app/features/products/product-variants.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteContext {
-  params: Promise<{ id: string }>;
-}
+type ProductVariantsRouteParams = RouteContext<"/api/products/[id]/variants">;
 
 interface CreateVariantBody {
   variantName: string;
@@ -52,7 +50,7 @@ function parseUserId(req: NextRequest): string {
 
 export async function GET(
   req: NextRequest,
-  context: RouteContext
+  context: ProductVariantsRouteParams
 ): Promise<NextResponse> {
   try {
     const { id: productId } = await context.params;
@@ -76,7 +74,7 @@ export async function GET(
 
 export async function POST(
   req: NextRequest,
-  context: RouteContext
+  context: ProductVariantsRouteParams
 ): Promise<NextResponse> {
   try {
     const { id: productId } = await context.params;

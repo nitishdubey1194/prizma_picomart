@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentTenant } from "@/lib/tenant";
 import { getAuthUser } from "@/app/features/auth/auth.utils";
-import { cancelAppointment } from "@/app/features/appointments/appointments.service";
+import { updateAppointmentStatus } from "@/app/features/appointments/appointments.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/appointments/[id]/cancel">;
 
 export async function POST(
   request: NextRequest,
@@ -37,7 +35,10 @@ export async function POST(
     }
 
     const tenant = await getCurrentTenant();
-    const result = await cancelAppointment(tenant.id, user.id, appointmentId, reason);
+    const result = await updateAppointmentStatus(tenant.id, user.id, appointmentId, {
+      status: "cancelled",
+      remarks: reason ?? "Cancelled by user.",
+    });
 
     return NextResponse.json(result, { status: 200 });
   } catch (error: unknown) {

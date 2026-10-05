@@ -4,9 +4,7 @@ import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { updateOrderStatus } from "@/app/features/orders/orders.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/orders/[id]/cancel">;
 
 export async function POST(
   request: NextRequest,

@@ -1,10 +1,10 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import {
   providerAvailability,
   providerAvailabilityExceptions,
   providers,
 } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertTenantRecordExists, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, asc } from "drizzle-orm";
 
@@ -112,23 +112,14 @@ export async function addRecurringBlock(
   }
 
   return await withTenantContext(pTenantId, userId, async (tx): Promise<ProviderAvailabilityRecord> => {
-    // 1. Verify provider belongs to this tenant[cite: 1]
-    const [provider] = await tx
-      .select({ id: providers.id })
-      .from(providers)
-      .where(
-        and(
-          eq(providers.id, pProviderId),
-          eq(providers.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
+    await assertTenantRecordExists(
+      tx,
+      providers,
+      pTenantId,
+      pProviderId,
+      "Provider not found."
+    );
 
-    if (!provider) {
-      throw new AppError(404, "Provider not found.");
-    }
-
-    // 2. Insert availability block[cite: 1]
     const [created] = await tx
       .insert(providerAvailability)
       .values({
@@ -236,23 +227,14 @@ export async function addDateException(
   }
 
   return await withTenantContext(pTenantId, userId, async (tx): Promise<ProviderExceptionRecord> => {
-    // 1. Verify provider belongs to tenant[cite: 1]
-    const [provider] = await tx
-      .select({ id: providers.id })
-      .from(providers)
-      .where(
-        and(
-          eq(providers.id, pProviderId),
-          eq(providers.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
+    await assertTenantRecordExists(
+      tx,
+      providers,
+      pTenantId,
+      pProviderId,
+      "Provider not found."
+    );
 
-    if (!provider) {
-      throw new AppError(404, "Provider not found.");
-    }
-
-    // 2. Insert exception record[cite: 1]
     const [created] = await tx
       .insert(providerAvailabilityExceptions)
       .values({
@@ -307,7 +289,3 @@ export async function deleteDateException(
   });
 }
 
-/**
- * Route handler compatibility alias
- */
-export const removeProviderException = deleteDateException;

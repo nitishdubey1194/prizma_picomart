@@ -8,12 +8,7 @@ import {
 } from "@/app/features/products/product-images.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{
-    id: string;
-    imageId: string;
-  }>;
-}
+type RouteParams = RouteContext<"/api/products/[id]/images/[imageId]">;
 
 export async function PATCH(
   request: NextRequest,

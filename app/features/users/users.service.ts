@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { users, profiles, tenantUsers, providers, userRoles } from "@/drizzle/schema";
 import { and, eq, or, ilike, sql } from "drizzle-orm";
 

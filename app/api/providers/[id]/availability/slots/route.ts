@@ -3,9 +3,7 @@ import { getCurrentTenant } from "@/lib/tenant";
 import { generateAvailableSlots } from "@/app/features/availability/generate-slots";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/providers/[id]/availability/slots">;
 
 export async function GET(
   request: NextRequest,
@@ -38,7 +36,7 @@ export async function GET(
     return NextResponse.json({ slots }, { status: 200 });
   } catch (error: unknown) {
     if (error instanceof AppError) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : "Failed to calculate slots";
     return NextResponse.json({ error: message }, { status: 500 });

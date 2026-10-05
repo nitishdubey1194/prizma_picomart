@@ -1,6 +1,10 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { products, productVariants, productImages, categories } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import {
+  assertTenantRecordExists,
+  assertUniqueTenantSlug,
+  withTenantContext,
+} from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, ilike, desc, sql } from "drizzle-orm";
 
@@ -189,41 +193,18 @@ export async function createProduct(
   const pTenantId = Number(tenantId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Ensure slug is unique for this tenant[cite: 1]
-    const [existingSlug] = await tx
-      .select({ id: products.id })
-      .from(products)
-      .where(
-        and(
-          eq(products.tenantId, pTenantId),
-          eq(products.slug, input.slug)
-        )
-      )
-      .limit(1);
+    await assertUniqueTenantSlug(tx, products, pTenantId, input.slug);
 
-    if (existingSlug) {
-      throw new AppError(409, "A product with this slug already exists.");
-    }
-
-    // 2. Validate category if provided[cite: 1]
     if (input.categoryId) {
-      const [category] = await tx
-        .select({ id: categories.id })
-        .from(categories)
-        .where(
-          and(
-            eq(categories.id, Number(input.categoryId)),
-            eq(categories.tenantId, pTenantId)
-          )
-        )
-        .limit(1);
-
-      if (!category) {
-        throw new AppError(404, "Specified category not found.");
-      }
+      await assertTenantRecordExists(
+        tx,
+        categories,
+        pTenantId,
+        input.categoryId,
+        "Specified category not found."
+      );
     }
 
-    // 3. Insert product[cite: 1]
     const [newProduct] = await tx
       .insert(products)
       .values({
@@ -259,23 +240,14 @@ export async function updateProduct(
   const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // Check if new slug collides with another product[cite: 1]
     if (input.slug) {
-      const [existingSlug] = await tx
-        .select({ id: products.id })
-        .from(products)
-        .where(
-          and(
-            eq(products.tenantId, pTenantId),
-            eq(products.slug, input.slug),
-            sql`${products.id} != ${pProductIdBigInt}`
-          )
-        )
-        .limit(1);
-
-      if (existingSlug) {
-        throw new AppError(409, "A product with this slug already exists.");
-      }
+      await assertUniqueTenantSlug(
+        tx,
+        products,
+        pTenantId,
+        input.slug,
+        pProductIdBigInt
+      );
     }
 
     const updatePayload: Record<string, unknown> = {

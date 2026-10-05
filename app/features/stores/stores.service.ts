@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { stores } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { unsetDefaultForTenant, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, desc, sql } from "drizzle-orm";
 
@@ -146,10 +146,7 @@ export async function createStore(
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.isDefault) {
-      await tx
-        .update(stores)
-        .set({ isDefault: false, updatedAt: sql`now()` })
-        .where(eq(stores.tenantId, pTenantId));
+      await unsetDefaultForTenant(tx, stores, pTenantId);
     }
 
     const [created] = await tx
@@ -212,15 +209,7 @@ export async function updateStore(
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
     if (input.isDefault) {
-      await tx
-        .update(stores)
-        .set({ isDefault: false, updatedAt: sql`now()` })
-        .where(
-          and(
-            eq(stores.tenantId, pTenantId),
-            sql`${stores.id} != ${pStoreIdBigInt}`
-          )
-        );
+      await unsetDefaultForTenant(tx, stores, pTenantId, pStoreIdBigInt);
     }
 
     const updatePayload: Record<string, unknown> = {

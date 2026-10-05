@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import { productImages, products } from "@/drizzle/schema";
-import { withTenantContext } from "@/lib/tenant";
+import { assertTenantRecordExists, withTenantContext } from "@/lib/tenant";
 import { AppError } from "@/lib/errors";
 import { and, eq, desc } from "drizzle-orm";
 
@@ -62,23 +62,14 @@ export async function addProductImage(
   const pProductIdBigInt = Number(productId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // 1. Verify parent product exists under this tenant[cite: 1]
-    const [product] = await tx
-      .select({ id: products.id })
-      .from(products)
-      .where(
-        and(
-          eq(products.id, pProductIdBigInt),
-          eq(products.tenantId, pTenantId)
-        )
-      )
-      .limit(1);
+    await assertTenantRecordExists(
+      tx,
+      products,
+      pTenantId,
+      pProductIdBigInt,
+      "Product not found for this tenant."
+    );
 
-    if (!product) {
-      throw new AppError(404, "Product not found for this tenant.");
-    }
-
-    // 2. Unset previous primary image if setting new image as primary[cite: 1]
     if (input.isPrimary) {
       await tx
         .update(productImages)
@@ -91,7 +82,7 @@ export async function addProductImage(
         );
     }
 
-    // 3. Insert new product image[cite: 1]
+    // Insert new product image
     const [newImage] = await tx
       .insert(productImages)
       .values({
@@ -124,7 +115,7 @@ export async function updateProductImage(
   const pImageIdBigInt = Number(imageId);
 
   return await withTenantContext(pTenantId, userId, async (tx) => {
-    // If setting as primary, demote existing primary images for this product[cite: 1]
+    // If setting as primary, demote existing primary images for this product
     if (input.isPrimary) {
       await tx
         .update(productImages)

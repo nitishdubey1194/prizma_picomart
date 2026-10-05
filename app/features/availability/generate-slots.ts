@@ -1,13 +1,14 @@
-import { db } from "@/lib/db";
+import { db } from "@/lib/db/index";
 import {
   providerAvailability,
   providerAvailabilityExceptions,
   appointments,
   services,
   providerServices,
+  providers,
 } from "@/drizzle/schema";
 import { AppError } from "@/lib/errors";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 export interface SlotTime {
   startTime: string; // ISO 8601
@@ -33,22 +34,30 @@ export async function generateAvailableSlots(
   const pServiceId = Number(options.serviceId);
   const targetDateStr = options.date;
 
-  // 1. Fetch service requirements (duration and buffer minutes)[cite: 1]
+  // Fetch service requirements (duration and buffer minutes)
   const [service] = await db
     .select({
       id: services.id,
       durationMinutes: services.durationMinutes,
       bufferMinutes: services.bufferMinutes,
       overrideDuration: providerServices.durationOverrideMinutes,
-      isMappingActive: providerServices.isActive,
     })
     .from(services)
-    .leftJoin(
+    .innerJoin(
       providerServices,
       and(
         eq(providerServices.serviceId, services.id),
         eq(providerServices.providerId, pProviderId),
-        eq(providerServices.tenantId, pTenantId)
+        eq(providerServices.tenantId, pTenantId),
+        eq(providerServices.isActive, true)
+      )
+    )
+    .innerJoin(
+      providers,
+      and(
+        eq(providers.id, providerServices.providerId),
+        eq(providers.tenantId, pTenantId),
+        eq(providers.isActive, true)
       )
     )
     .where(
@@ -68,7 +77,7 @@ export async function generateAvailableSlots(
   const totalSlotSpanMs = (effectiveDuration + service.bufferMinutes) * 60 * 1000;
   const serviceDurationMs = effectiveDuration * 60 * 1000;
 
-  // 2. Check for date exceptions (blackout vs special working hours)[cite: 1]
+  // Check for date exceptions (blackout vs special working hours)
   const [exception] = await db
     .select()
     .from(providerAvailabilityExceptions)
@@ -81,12 +90,12 @@ export async function generateAvailableSlots(
     )
     .limit(1);
 
-  // If a blackout date exception exists (isAvailable = false), return no slots[cite: 1]
+  // If a blackout date exception exists (isAvailable = false), return no slots
   if (exception && !exception.isAvailable) {
     return [];
   }
 
-  // 3. Determine operational time windows for the target date[cite: 1]
+  // Determine operational time windows for the target date
   interface TimeWindow {
     startMs: number;
     endMs: number;
@@ -98,7 +107,7 @@ export async function generateAvailableSlots(
     const windowEnd = new Date(`${targetDateStr}T${exception.endTime}`).getTime();
     operationalWindows.push({ startMs: windowStart, endMs: windowEnd });
   } else {
-    // Fall back to recurring weekday schedule[cite: 1]
+    // Fall back to recurring weekday schedule
     const weekday = new Date(`${targetDateStr}T00:00:00`).getDay(); // 0 (Sun) to 6 (Sat)
 
     const scheduleBlocks = await db
@@ -127,7 +136,7 @@ export async function generateAvailableSlots(
     return [];
   }
 
-  // 4. Fetch all existing active appointments on this date[cite: 1]
+  // Fetch all existing active appointments on this date
   const bookedAppointments = await db
     .select({
       startTime: appointments.startTime,
@@ -148,7 +157,7 @@ export async function generateAvailableSlots(
     endMs: new Date(b.endTime).getTime(),
   }));
 
-  // 5. Generate discrete time intervals and filter out conflicts[cite: 1]
+  // Generate discrete time intervals and filter out conflicts
   const availableSlots: SlotTime[] = [];
   const nowMs = Date.now();
 

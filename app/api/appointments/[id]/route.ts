@@ -4,9 +4,7 @@ import { getAuthUser } from "@/app/features/auth/auth.utils";
 import { getAppointmentById } from "@/app/features/appointments/appointments.service";
 import { AppError } from "@/lib/errors";
 
-interface RouteParams {
-  params: Promise<{ id: string }>;
-}
+type RouteParams = RouteContext<"/api/appointments/[id]">;
 
 export async function GET(
   request: NextRequest,
